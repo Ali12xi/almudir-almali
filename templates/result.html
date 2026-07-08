@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="{{ t.lang }}" dir="{{ t.dir }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ t.result }} — {{ t.brand }}</title>
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#0F2A43">
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header>
+    <div class="wrap bar">
+      <a class="brand" href="{{ url_for('index', lang=t.lang) }}">
+        <img src="{{ url_for('static', filename='favicon.svg') }}" alt="" width="26" height="26">
+        <span>{{ t.brand }}</span>
+      </a>
+      <a class="langbtn" href="{{ url_for('index', lang=t.lang) }}">← {{ t.again }}</a>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <h1 class="rtitle">{{ t.result }} — {{ company }}</h1>
+
+    {% if vm.decision_head %}
+    <div class="decision">
+      <div class="kicker">{{ t.decision }}</div>
+      <div class="head">{{ vm.decision_head }}</div>
+      <div class="detail">{{ vm.decision_detail }}</div>
+    </div>
+    {% endif %}
+
+    {% set band_col = 'var(--green)' if a.safety_band=='good' else ('var(--amber)' if a.safety_band=='medium' else 'var(--red)') %}
+    <div class="heroes">
+      <div class="hero-card">
+        <div class="hv" style="color:{{ band_col }}">{{ a.safety_score }}<span class="hsm">/100</span></div>
+        <div class="hl">{{ t.safety }} · {{ vm.safety_label }}</div>
+      </div>
+      {% if a.survival_days is not none %}
+      <div class="hero-card">
+        <div class="hv" style="color:var(--red)">~{{ "%.0f"|format(a.survival_days) }}</div>
+        <div class="hl">{{ t.survival }}</div>
+      </div>
+      {% endif %}
+      {% if a.total_savings > 0 %}
+      <div class="hero-card">
+        <div class="hv" style="color:var(--green)">{{ "{:,.0f}".format(a.total_savings) }}</div>
+        <div class="hl">{{ t.savings }}</div>
+      </div>
+      {% endif %}
+    </div>
+
+    <div class="stats">
+      <div class="stat"><div class="v">{{ "{:,.0f}".format(a.total_income) }}</div><div class="l">{{ t.income }}</div></div>
+      <div class="stat"><div class="v">{{ "{:,.0f}".format(a.total_expense) }}</div><div class="l">{{ t.expenses }}</div></div>
+      <div class="stat"><div class="v" style="color:{{ 'var(--green)' if a.net_profit>=0 else 'var(--red)' }}">{{ "{:,.0f}".format(a.net_profit) }}</div><div class="l">{{ t.net }}</div></div>
+      <div class="stat"><div class="v">{{ "%.0f"|format(a.avg_margin*100) }}%</div><div class="l">{{ t.margin }}</div></div>
+    </div>
+
+    <div class="center">
+      {% set chip_cls = 'green' if a.safety_band=='good' else ('amber' if a.safety_band=='medium' else 'red') %}
+      <span class="chip {{ chip_cls }}">{{ t[vm.status_key] }}</span>
+    </div>
+
+    <p class="summary-line">{{ vm.summary }}
+      {% if vm.resilience_line %} {{ vm.resilience_line }}{% endif %}
+      {% if vm.buffer_line %} {{ vm.buffer_line }}{% endif %}
+      {% if vm.runway_line %} {{ vm.runway_line }}{% endif %}
+    </p>
+
+    {% if vm.salary_line or vm.recurring_line %}
+    <div class="reads">
+      {% if vm.salary_line %}
+      <div class="read"><div class="read-h">{{ t.payroll_t }}</div><p>{{ vm.salary_line }}</p></div>
+      {% endif %}
+      {% if vm.recurring_line %}
+      <div class="read"><div class="read-h">{{ t.recurring_t }}</div><p>{{ vm.recurring_line }}</p></div>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {% if vm.risks %}
+    <div class="risks">
+      <h3>{{ t.hidden }}</h3>
+      {% for r in vm.risks %}<div class="r">{{ r }}</div>{% endfor %}
+    </div>
+    {% endif %}
+
+    {% if vm.recs %}
+    <div class="risks todo">
+      <h3>{{ t.todo_t }}</h3>
+      {% for r in vm.recs %}<div class="r num">{{ loop.index }}. {{ r }}</div>{% endfor %}
+      {% if vm.savings_line %}<div class="savings-line">{{ vm.savings_line }}</div>{% endif %}
+    </div>
+    {% endif %}
+
+    <a class="dl" href="{{ url_for('download', uid=uid) }}">↓ {{ t.download }}</a>
+    <a class="again" href="{{ url_for('index', lang=t.lang) }}">{{ t.again }}</a>
+  </main>
+</body>
+</html>

@@ -1,0 +1,13 @@
+# أسرار — لا تُرفع أبداً
+.env
+*.key
+
+# مخرجات وملفات مؤقتة
+outputs/
+uploads/
+__pycache__/
+*.pyc
+
+# ملفات النظام
+.DS_Store
+Thumbs.db

@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="{{ t.lang }}" dir="{{ t.dir }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ t.meta_title }}</title>
+  <meta name="description" content="{{ t.meta_desc }}">
+  <meta name="keywords" content="{{ t.meta_kw }}">
+  <meta name="robots" content="index, follow">
+  <meta name="theme-color" content="#0F2A43">
+  <link rel="canonical" href="{{ site }}/{{ '?lang=en' if t.lang=='en' else '' }}">
+  <link rel="alternate" hreflang="ar" href="{{ site }}/">
+  <link rel="alternate" hreflang="en" href="{{ site }}/?lang=en">
+  <link rel="alternate" hreflang="x-default" href="{{ site }}/">
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+
+  <!-- Open Graph / Twitter -->
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="{{ t.brand }}">
+  <meta property="og:title" content="{{ t.meta_title }}">
+  <meta property="og:description" content="{{ t.meta_desc }}">
+  <meta property="og:url" content="{{ site }}/">
+  <meta property="og:locale" content="{{ 'ar_SA' if t.lang=='ar' else 'en_US' }}">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="{{ t.meta_title }}">
+  <meta name="twitter:description" content="{{ t.meta_desc }}">
+
+  <script type="application/ld+json" nonce="{{ csp_nonce }}">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "{{ t.brand }}",
+    "applicationCategory": "FinanceApplication",
+    "operatingSystem": "Web",
+    "description": "{{ t.meta_desc }}",
+    "offers": { "@type": "Offer", "price": "199", "priceCurrency": "SAR" }
+  }
+  </script>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header>
+    <div class="wrap bar">
+      <a class="brand" href="{{ url_for('index', lang=t.lang) }}">
+        <img src="{{ url_for('static', filename='favicon.svg') }}" alt="" width="26" height="26">
+        <span>{{ t.brand }}</span>
+      </a>
+      <a class="langbtn" href="{{ url_for('index', lang=t.other) }}" rel="alternate">{{ t.other_name }}</a>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero wrap">
+      <span class="eyebrow">{{ t.eyebrow }}</span>
+      <h1>{{ t.tagline }}</h1>
+      <p class="lead">{{ t.sub }}</p>
+    </section>
+
+    <section class="wrap">
+      <div class="split">
+        <form class="card" id="form" method="post" action="{{ url_for('analyze') }}" enctype="multipart/form-data">
+        <input type="hidden" name="lang" value="{{ t.lang }}">
+        {% if error %}<div class="err" role="alert">{{ error }}</div>{% endif %}
+
+        <label class="flabel">{{ t.upload }}</label>
+        <div class="drop" id="drop" tabindex="0" role="button" aria-label="{{ t.upload }}">
+          <div class="drop-ic" aria-hidden="true">↑</div>
+          <div class="drop-main">{{ t.upload_hint }}</div>
+          <div class="drop-sub">{{ t.formats }}</div>
+          <div class="drop-note">{{ t.formats_note }}</div>
+          <div class="fname" id="fname"></div>
+        </div>
+        <input type="file" id="file" name="file" required class="file-input"
+               accept=".xlsx,.xls,.csv,.pdf,.docx,.txt,.png,.jpg,.jpeg,.webp">
+
+        <div class="row">
+          <div class="field">
+            <label for="company">{{ t.company }}</label>
+            <input type="text" id="company" name="company" maxlength="80" placeholder="{{ t.company_ph }}">
+          </div>
+          <div class="field">
+            <label for="cash">{{ t.cash }} <span class="hint">· {{ t.cash_hint }}</span></label>
+            <input type="text" inputmode="numeric" id="cash" name="cash" placeholder="{{ t.cash_ph }}">
+          </div>
+        </div>
+
+        <div class="secnote">🔒 <strong>{{ t.sec_title }}</strong> — {{ t.sec_line }}</div>
+        <button class="btn" id="btn" type="submit" data-steps="{{ t.steps }}">{{ t.btn }}</button>
+        </form>
+
+        <aside class="preview">
+          <h2 class="preview-h">{{ t.preview_title }}</h2>
+          <ul class="checks">
+            <li>{{ t.p1 }}</li>
+            <li>{{ t.p2 }}</li>
+            <li>{{ t.p3 }}</li>
+            <li>{{ t.p4 }}</li>
+            <li>{{ t.p5 }}</li>
+            <li>{{ t.p6 }}</li>
+            <li>{{ t.p7 }}</li>
+          </ul>
+        </aside>
+      </div>
+
+      <ul class="trust">
+        <li><strong>{{ t.trust1 }}</strong><span>{{ t.trust1d }}</span></li>
+        <li><strong>{{ t.trust2 }}</strong><span>{{ t.trust2d }}</span></li>
+        <li><strong>{{ t.trust3 }}</strong><span>{{ t.trust3d }}</span></li>
+      </ul>
+    </section>
+
+    <section class="wrap block">
+      <h2>{{ t.how_t }}</h2>
+      <div class="steps">
+        <div class="step"><span class="num">1</span><h3>{{ t.s1 }}</h3><p>{{ t.s1d }}</p></div>
+        <div class="step"><span class="num">2</span><h3>{{ t.s2 }}</h3><p>{{ t.s2d }}</p></div>
+        <div class="step"><span class="num">3</span><h3>{{ t.s3 }}</h3><p>{{ t.s3d }}</p></div>
+      </div>
+    </section>
+
+    <section class="wrap block">
+      <h2>{{ t.feats_t }}</h2>
+      <p class="block-sub">{{ t.feats_sub }}</p>
+      <div class="feats six">
+        <div class="feat"><div class="feat-ic" aria-hidden="true">◎</div><h3>{{ t.f1 }}</h3><p>{{ t.f1d }}</p></div>
+        <div class="feat"><div class="feat-ic" aria-hidden="true">⏳</div><h3>{{ t.f2 }}</h3><p>{{ t.f2d }}</p></div>
+        <div class="feat"><div class="feat-ic" aria-hidden="true">🩸</div><h3>{{ t.f3 }}</h3><p>{{ t.f3d }}</p></div>
+        <div class="feat"><div class="feat-ic" aria-hidden="true">👥</div><h3>{{ t.f4 }}</h3><p>{{ t.f4d }}</p></div>
+        <div class="feat"><div class="feat-ic" aria-hidden="true">🔁</div><h3>{{ t.f5 }}</h3><p>{{ t.f5d }}</p></div>
+        <div class="feat"><div class="feat-ic" aria-hidden="true">🛡️</div><h3>{{ t.f6 }}</h3><p>{{ t.f6d }}</p></div>
+      </div>
+    </section>
+
+    <section class="wrap block">
+      <h2>{{ t.why_t }}</h2>
+      <div class="feats">
+        <div class="feat edge"><h3>{{ t.w1 }}</h3><p>{{ t.w1d }}</p></div>
+        <div class="feat edge"><h3>{{ t.w2 }}</h3><p>{{ t.w2d }}</p></div>
+        <div class="feat edge"><h3>{{ t.w3 }}</h3><p>{{ t.w3d }}</p></div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <div class="ftag">{{ t.footer_tag }}</div>
+      <div class="fdisc">{{ t.footer_disc }}</div>
+      <div class="fcopy">© 2026 {{ t.brand }}</div>
+    </div>
+  </footer>
+
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
