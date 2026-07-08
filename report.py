@@ -4,6 +4,7 @@
 التخطيط واعٍ بالاتجاه: كل عنصر يُرسم من «الحافة القائدة» (يمين للعربي، يسار للإنجليزي).
 """
 from __future__ import annotations
+import os
 import arabic_reshaper
 from bidi.algorithm import get_display
 from reportlab.lib.pagesizes import A4
@@ -15,9 +16,10 @@ from reportlab.pdfbase.ttfonts import TTFont
 
 import i18n
 
-# خط واحد يدعم العربي واللاتيني معاً
-pdfmetrics.registerFont(TTFont("Body", r"C:\Windows\Fonts\arial.ttf"))
-pdfmetrics.registerFont(TTFont("Bold", r"C:\Windows\Fonts\arialbd.ttf"))
+# خطوط عربية مرفقة داخل المشروع (Tajawal) — تعمل على ويندوز ولينكس (Render) معاً.
+_FONT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts")
+pdfmetrics.registerFont(TTFont("Body", os.path.join(_FONT_DIR, "Tajawal-Regular.ttf")))
+pdfmetrics.registerFont(TTFont("Bold", os.path.join(_FONT_DIR, "Tajawal-Bold.ttf")))
 
 NAVY = HexColor("#0F2A43"); GREEN = HexColor("#1D9A6C"); RED = HexColor("#C0392B")
 AMBER = HexColor("#E08E0B"); GRAY = HexColor("#6B7A8D"); LIGHT = HexColor("#F4F6F8")
