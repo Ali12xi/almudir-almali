@@ -58,6 +58,8 @@
       <div class="stat"><div class="v">{{ "%.0f"|format(a.avg_margin*100) }}%</div><div class="l">{{ t.margin }}</div></div>
     </div>
 
+    <p class="cashnote"><i>ℹ️</i> {{ t.cashflow_note }}</p>
+
     <div class="center">
       {% set chip_cls = 'green' if a.safety_band=='good' else ('amber' if a.safety_band=='medium' else 'red') %}
       <span class="chip {{ chip_cls }}">{{ t[vm.status_key] }}</span>

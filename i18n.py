@@ -32,9 +32,9 @@ def finding_title(f, lang) -> str:
     if k == "customer_concentration":
         return "تركّز العملاء" if lang == "ar" else "Client concentration"
     if k == "margin_erosion":
-        return "تآكل الأرباح" if lang == "ar" else "Margin erosion"
+        return "تآكل صافي التدفق" if lang == "ar" else "Cash-flow erosion"
     if k == "sales_up_profit_down":
-        return "مبيعات تزيد / أرباح تنقص" if lang == "ar" else "Sales up / profit down"
+        return "الوارد يزيد / الصافي ينقص" if lang == "ar" else "Inflows up / net down"
     if k == "expense_spike":
         cat = f["data"]["category"]
         return f"قفزة في مصروف: {cat}" if lang == "ar" else f"Spike in {cat}"
@@ -50,20 +50,20 @@ def finding_text(f, lang) -> str:
     k, d = f["key"], f["data"]
     if k == "customer_concentration":
         if lang == "ar":
-            return (f"أكبر عميل ({d['name']}) يمثّل {pct(d['share'])} من إيراداتك. "
-                    f"لو توقّف، تخسر حوالي {money(d['monthly'], 'ar')} شهرياً.")
-        return (f"Your largest client ({d['name']}) makes up {pct(d['share'])} of revenue. "
-                f"If they leave, you lose about {money(d['monthly'], 'en')} per month.")
+            return (f"أكبر مصدر وارد ({d['name']}) يمثّل {pct(d['share'])} من الوارد إلى حسابك. "
+                    f"لو توقّف، ينقص وارِدك حوالي {money(d['monthly'], 'ar')} شهرياً.")
+        return (f"Your largest inflow source ({d['name']}) makes up {pct(d['share'])} of money coming in. "
+                f"If it stops, your inflows drop about {money(d['monthly'], 'en')} per month.")
     if k == "margin_erosion":
         if lang == "ar":
-            return (f"هامش ربحك نزل من {pct(d['first'])} إلى {pct(d['last'])} خلال الفترة "
-                    f"(انخفاض {d['drop_pts']:.0f} نقطة). أرباحك تتآكل رغم استقرار المبيعات.")
-        return (f"Your profit margin fell from {pct(d['first'])} to {pct(d['last'])} over the period "
-                f"(a {d['drop_pts']:.0f}-point drop). Profits are eroding even as sales hold steady.")
+            return (f"نسبة صافي تدفقك النقدي نزلت من {pct(d['first'])} إلى {pct(d['last'])} خلال الفترة "
+                    f"(انخفاض {d['drop_pts']:.0f} نقطة). ما يبقى في حسابك من كل ريال وارد يتآكل.")
+        return (f"Your net cash-flow ratio fell from {pct(d['first'])} to {pct(d['last'])} over the period "
+                f"(a {d['drop_pts']:.0f}-point drop). Less of each riyal coming in stays in your account.")
     if k == "sales_up_profit_down":
         if lang == "ar":
-            return "مبيعاتك ترتفع لكن صافي ربحك ينخفض — معناه مصاريفك تكبر أسرع من دخلك."
-        return "Your sales are rising but net profit is falling — expenses are growing faster than revenue."
+            return "الوارد إلى حسابك يرتفع لكن صافي تدفقك ينخفض — مدفوعاتك تكبر أسرع من الوارد."
+        return "Money coming in is rising but your net cash flow is falling — outflows are growing faster than inflows."
     if k == "expense_spike":
         if lang == "ar":
             return (f"مصروف «{d['category']}» قفز من ~{money(d['early'],'ar')} إلى ~{money(d['late'],'ar')} شهرياً. "
@@ -72,26 +72,26 @@ def finding_text(f, lang) -> str:
                 f"Bringing it back to normal saves about {money(d['excess_year'],'en')} per year.")
     if k == "thin_cushion":
         if lang == "ar":
-            return (f"تتحمّل انخفاض مبيعاتك حتى {pct(d['drop_pct'])} فقط قبل أن تبدأ الخسارة — "
-                    f"وسادة ضيّقة. أي تراجع مفاجئ في السوق أو خسارة عميل يدخلك منطقة الخطر بسرعة.")
-        return (f"Your sales can fall only {pct(d['drop_pct'])} before you start losing money — "
-                f"a thin cushion. Any sudden market dip or lost client pushes you into the red fast.")
+            return (f"يتحمّل وارِدك انخفاضاً حتى {pct(d['drop_pct'])} فقط قبل أن يصير تدفقك النقدي سالباً — "
+                    f"وسادة ضيّقة. أي تراجع مفاجئ أو توقّف مصدر وارد يدخلك منطقة الخطر بسرعة.")
+        return (f"Your inflows can fall only {pct(d['drop_pct'])} before your cash flow turns negative — "
+                f"a thin cushion. Any sudden dip or lost inflow source pushes you into the red fast.")
     if k == "high_payroll":
         if lang == "ar":
-            return (f"رواتبك تلتهم {pct(d['ratio'])} من دخلك (~{money(d['monthly'],'ar')} شهرياً "
-                    f"لـ{d['count']} موظف). نسبة مرتفعة تجعل أي شهر ضعيف يضغط على سيولتك مباشرة.")
-        return (f"Payroll eats {pct(d['ratio'])} of your revenue (~{money(d['monthly'],'en')}/month "
-                f"for {d['count']} staff). A high ratio means any slow month squeezes your cash immediately.")
+            return (f"الرواتب تلتهم {pct(d['ratio'])} من الوارد إلى حسابك (~{money(d['monthly'],'ar')} شهرياً "
+                    f"لـ{d['count']} مستفيد). نسبة مرتفعة تجعل أي شهر ضعيف يضغط على نقدك مباشرة.")
+        return (f"Payroll eats {pct(d['ratio'])} of your inflows (~{money(d['monthly'],'en')}/month "
+                f"for {d['count']} recipients). A high ratio means any slow month squeezes your cash immediately.")
     return ""
 
 
 # ---------- قرار الأسبوع ----------
 def decision_headline(sar, tf, lang, kind="save") -> str:
     tw = timeframe_word(tf, lang)
-    if kind == "protect":   # الرقم دخل مهدَّد (تركّز عملاء) — نحميه لا نوفّره
+    if kind == "protect":   # الرقم وارد مهدَّد (تركّز مصدر) — نحميه لا نوفّره
         if lang == "ar":
-            return f"قرار واحد هذا الأسبوع يحمي ~{money(sar,'ar')} {tw} من دخلك المعلّق على عميل واحد."
-        return f"One decision this week protects ~{money(sar,'en')} {tw} of revenue riding on a single client."
+            return f"قرار واحد هذا الأسبوع يحمي ~{money(sar,'ar')} {tw} من وارِدك المعلّق على مصدر واحد."
+        return f"One decision this week protects ~{money(sar,'en')} {tw} of inflows riding on a single source."
     if lang == "ar":
         return f"في قرار واحد لو أخذته هذا الأسبوع، يوفّر لك حوالي {money(sar,'ar')} {tw}."
     return f"One decision this week could save you about {money(sar,'en')} {tw}."
@@ -108,11 +108,11 @@ def rec_text(item, lang) -> str:
                 f"bleed — start with your largest non-essential line this week.")
     if k == "act_diversify":
         if lang == "ar":
-            return (f"اعتمادك على عميل واحد ({pct(d['share'])}) خطر. استهدف إضافة "
-                    f"~{money(d['monthly_new'],'ar')} شهرياً من دخل عملاء جدد خلال 90 يوماً "
+            return (f"اعتمادك على مصدر وارد واحد ({pct(d['share'])}) خطر. استهدف إضافة "
+                    f"~{money(d['monthly_new'],'ar')} شهرياً من مصادر وارد جديدة خلال 90 يوماً "
                     f"لتنزيل الحصة تحت 50%.")
-        return (f"Depending on one client ({pct(d['share'])}) is risky. Aim to add "
-                f"~{money(d['monthly_new'],'en')} per month in new-client revenue within 90 days "
+        return (f"Depending on one inflow source ({pct(d['share'])}) is risky. Aim to add "
+                f"~{money(d['monthly_new'],'en')} per month from new inflow sources within 90 days "
                 f"to bring the share under 50%.")
     if k == "act_trim":
         if lang == "ar":
@@ -147,46 +147,50 @@ def rec_text(item, lang) -> str:
     return finding_text(item, lang)
 
 
-# ---------- جُمل التقرير ----------
+# ---------- جُمل التقرير (لغة تدفق نقدي صادقة — ليست ربحاً محاسبياً) ----------
 def summary_sentence(a, lang) -> str:
-    inc, exp, net, m = a.total_income, a.total_expense, a.net_profit, a.avg_margin
+    inc, exp, net = a.total_income, a.total_expense, a.net_profit
     if lang == "ar":
-        kind = "ربح" if net >= 0 else "خسارة"
-        return (f"خلال الفترة، إجمالي دخلك {money(inc,'ar')} ومصاريفك {money(exp,'ar')}، "
-                f"أي صافي {kind} {money(net,'ar')} بهامش {pct(m)}.")
-    kind = "profit" if net >= 0 else "loss"
-    return (f"Over the period, total income was {money(inc,'en')} and expenses {money(exp,'en')}, "
-            f"a net {kind} of {money(net,'en')} at a {pct(m)} margin.")
+        kind = "فائض نقدي" if net >= 0 else "عجز نقدي"
+        return (f"خلال الفترة، دخل إلى حسابك {money(inc,'ar')} وخرج منه {money(exp,'ar')}، "
+                f"أي صافي {kind} قدره {money(net,'ar')}. "
+                f"(هذا تدفق نقدي من كشف البنك — وليس صافي ربح؛ الربح الفعلي يحتاج فواتيرك ومصاريفك المستحقة.)")
+    kind = "net cash surplus" if net >= 0 else "net cash deficit"
+    return (f"Over the period, {money(inc,'en')} came into your account and {money(exp,'en')} went out — "
+            f"a {kind} of {money(net,'en')}. "
+            f"(This is cash flow from your bank statement — not net profit; true profit needs your invoices and accruals.)")
 
 
 def runway_sentence(r, lang) -> str:
     if lang == "ar":
-        return (f"سيولتك تنخفض حوالي {money(r['burn'],'ar')} شهرياً. برصيدك الحالي "
-                f"({money(r['cash'],'ar')})، المتوقع أن تصل السيولة لحد الخطر خلال "
-                f"~{r['days']:.0f} يوم إذا استمر الوضع على ما هو عليه.")
+        return (f"نقدك ينخفض حوالي {money(r['burn'],'ar')} شهرياً. برصيدك الحالي "
+                f"({money(r['cash'],'ar')})، المتوقع أن يصل النقد لحد الخطر خلال "
+                f"~{r['days']:.0f} يوم إذا استمر الاتجاه على ما هو عليه.")
     return (f"Your cash is falling about {money(r['burn'],'en')} per month. At your current balance "
             f"({money(r['cash'],'en')}), you're on track to hit a danger point in "
             f"~{r['days']:.0f} days if the trend continues.")
 
 
 def resilience_sentence(a, lang) -> str:
-    """وسادة الأمان: كم يتحمّل انخفاض المبيعات قبل الخسارة — تُعرض دائماً (إيجاباً أو تحذيراً)."""
+    """وسادة التدفق: كم يتحمّل انخفاض الوارد قبل أن يصير التدفق سالباً."""
     dp = a.breakeven_drop_pct
     if lang == "ar":
         strong = "وسادة قوية" if dp >= 0.30 else "وسادة متوسطة" if dp >= 0.20 else "وسادة رقيقة — انتبه"
-        return f"وسادة الأمان: تتحمّل انخفاض مبيعاتك حتى {pct(dp)} قبل أن تبدأ الخسارة ({strong})."
+        return (f"وسادة التدفق: يتحمّل الوارد إلى حسابك انخفاضاً حتى {pct(dp)} قبل أن يصبح تدفقك النقدي سالباً "
+                f"({strong}).")
     strong = "strong" if dp >= 0.30 else "moderate" if dp >= 0.20 else "thin — watch out"
-    return f"Safety cushion: sales can drop up to {pct(dp)} before you start losing money ({strong})."
+    return (f"Cash cushion: your inflows can drop up to {pct(dp)} before your cash flow turns negative "
+            f"({strong}).")
 
 
 def buffer_sentence(a, lang) -> str:
-    """شهور تغطية السيولة لو توقّف الدخل تماماً."""
+    """شهور تغطية النقد لو توقّف الوارد تماماً."""
     b = a.buffer_months
     if lang == "ar":
-        return (f"برصيدك الحالي ({money(a.cash,'ar')}) تغطّي ~{b:.1f} شهر من مصاريفك "
-                f"حتى لو توقّف دخلك تماماً.")
+        return (f"برصيدك الحالي ({money(a.cash,'ar')}) تغطّي ~{b:.1f} شهر من مدفوعاتك "
+                f"حتى لو توقّف الوارد تماماً.")
     return (f"Your current balance ({money(a.cash,'en')}) covers ~{b:.1f} months of "
-            f"expenses even if your income stopped completely.")
+            f"outflows even if all inflows stopped.")
 
 
 def period_label(first_ym, last_ym, lang) -> str:
@@ -217,10 +221,10 @@ def savings_sentence(amount, lang) -> str:
 def salary_sentence(a, lang) -> str:
     """ملخص الرواتب المستخرج من الكشف — يظهر دائماً حين توجد رواتب."""
     if lang == "ar":
-        return (f"رواتبك ~{money(a.salary_monthly,'ar')} شهرياً لـ{a.salary_count} موظف، "
-                f"أي {pct(a.salary_ratio)} من دخلك.")
-    return (f"Payroll is ~{money(a.salary_monthly,'en')}/month for {a.salary_count} staff — "
-            f"{pct(a.salary_ratio)} of your revenue.")
+        return (f"رواتبك ~{money(a.salary_monthly,'ar')} شهرياً لـ{a.salary_count} مستفيد، "
+                f"أي {pct(a.salary_ratio)} من الوارد إلى حسابك.")
+    return (f"Payroll is ~{money(a.salary_monthly,'en')}/month for {a.salary_count} recipients — "
+            f"{pct(a.salary_ratio)} of your inflows.")
 
 
 def recurring_sentence(a, lang) -> str:
@@ -238,35 +242,37 @@ REPORT = {
         "brand": "المدير المالي",
         "report_of": "تقرير", "period": "الفترة",
         "decision_kicker": "قرار هذا الأسبوع",
-        "flip": "اقلب الصفحة للتقرير الكامل ←",
-        "overview": "الوضع العام", "healthy": "وضع صحي", "caution": "مستقر — مع تحفّظات",
-        "risk": "يحتاج تدخّل عاجل",
+        "flip": "التقرير الكامل في الصفحات التالية",
+        "overview": "الوضع النقدي", "healthy": "تدفق نقدي موجب", "caution": "مستقر — مع تحفّظات",
+        "risk": "التدفق النقدي يحتاج تدخّلاً",
         "cash_warn": "تحذير سيولة",
-        "survival": "ساعة بقاء الشركة", "savings": "التوفير الممكن", "safety": "مؤشر الأمان",
+        "survival": "ساعة بقاء الشركة", "savings": "التوفير الممكن", "safety": "مؤشر الأمان النقدي",
         "days": "يوم", "of100": "من 100",
-        "earn": "من أين تكسب", "bleed": "أين تنزف",
+        "earn": "من أين يدخل النقد", "bleed": "إلى أين يخرج النقد",
         "payroll": "قراءة الرواتب", "recurring": "التزامات متكررة صامتة",
-        "emp": "موظف", "per_month": "شهرياً", "per_year": "سنوياً", "of_income": "من الدخل",
+        "emp": "موظف", "per_month": "شهرياً", "per_year": "سنوياً", "of_income": "من الوارد",
         "risks": "المخاطر المخفية", "todo": "ماذا تفعل الآن",
-        "footer": "هذا التقرير مبني على الأرقام التي رفعتها. الحسابات دقيقة؛ "
-                  "التقديرات المستقبلية افتراضية تعتمد على استمرار الاتجاه الحالي. — المدير المالي",
+        "footer": "تحليل تدفق نقدي مبني على كشف حسابك البنكي — يكشف حركة نقدك ومخاطرها، وليس صافي "
+                  "الربح المحاسبي (الذي يحتاج فواتيرك ومصاريفك المستحقة). أداة استرشادية لا تغني عن "
+                  "مراجعة محاسب مختص. — المدير المالي",
     },
     "en": {
         "brand": "The Financial Director",
         "report_of": "Report ·", "period": "Period",
         "decision_kicker": "This week's decision",
-        "flip": "→ Turn the page for the full report",
-        "overview": "Overview", "healthy": "Healthy", "caution": "Stable — with caveats",
-        "risk": "Needs urgent action",
+        "flip": "The full report is on the following pages",
+        "overview": "Cash position", "healthy": "Positive cash flow", "caution": "Stable — with caveats",
+        "risk": "Cash flow needs action",
         "cash_warn": "Cash warning",
-        "survival": "Business survival clock", "savings": "Possible savings", "safety": "Safety score",
+        "survival": "Business survival clock", "savings": "Possible savings", "safety": "Cash safety score",
         "days": "days", "of100": "of 100",
-        "earn": "Where you earn", "bleed": "Where you bleed",
+        "earn": "Where cash comes in", "bleed": "Where cash goes out",
         "payroll": "Payroll read", "recurring": "Silent recurring charges",
-        "emp": "staff", "per_month": "per month", "per_year": "per year", "of_income": "of revenue",
+        "emp": "staff", "per_month": "per month", "per_year": "per year", "of_income": "of inflows",
         "risks": "Hidden risks", "todo": "What to do now",
-        "footer": "This report is based on the numbers you uploaded. Calculations are exact; "
-                  "forward estimates are assumptions based on the current trend. — The Financial Director",
+        "footer": "A cash-flow analysis based on your bank statement — it surfaces how your cash moves "
+                  "and its risks, not accounting net profit (which needs your invoices and accruals). "
+                  "A guidance tool, not a substitute for a qualified accountant. — The Financial Director",
     },
 }
 
@@ -301,7 +307,7 @@ def ui(lang):
         "p2": "أعلى 5 مواطن تهدر فيها فلوسك",
         "p3": "هل تعتمد على عميل واحد بخطورة؟",
         "p4": "توقّع السيولة: كم يوم تكفيك؟",
-        "p5": "مصاريف تنمو بصمت وتأكل أرباحك",
+        "p5": "مصاريف تنمو بصمت وتأكل صافي تدفقك",
         "p6": "مؤشر أمان لشركتك من 100",
         "p7": "توصيات تنفيذية + إجمالي التوفير الممكن",
         "sec_title": "أرقامك بأمان",
@@ -314,26 +320,28 @@ def ui(lang):
         "f1": "قرار الأسبوع", "f1d": "أهم خطوة مالية هذا الأسبوع، مسعّرة بالريال — تنفّذها فوراً.",
         "f2": "ساعة البقاء", "f2d": "كم يوماً تكفيك سيولتك بمعدل إنفاقك الحالي، قبل أن تصل لحد الرواتب.",
         "f3": "كاشف النزيف", "f3d": "أين تتسرّب أموالك بالضبط — أعلى بنود المصاريف ومَن يستنزفك.",
-        "f4": "قراءة الرواتب", "f4d": "إجمالي رواتبك ونسبتها من دخلك — وهل هي عبء يهدّد سيولتك.",
+        "f4": "قراءة الرواتب", "f4d": "إجمالي رواتبك ونسبتها من الوارد — وهل هي عبء يهدّد سيولتك.",
         "f5": "الالتزامات الصامتة", "f5d": "اشتراكات وخدمات تُسحب تلقائياً كل شهر وقد نسيتها — نرصدها لك.",
-        "f6": "مؤشر الأمان", "f6d": "درجة صحة شركتك من 100، ووسادة الأمان: كم تتحمّل قبل الخسارة.",
+        "f6": "مؤشر الأمان النقدي", "f6d": "درجة أمان تدفقك من 100، ووسادة الأمان: كم يتحمّل الوارد قبل أن يصير التدفق سالباً.",
         "why_t": "لماذا المدير المالي؟",
         "w1": "قرار لا مجرد أرقام", "w1d": "نبدأ بأهم قرار هذا الأسبوع مسعّراً بالريال — لا صفحات أرقام.",
         "w2": "دقة بالكود لا تخمين", "w2d": "كل رقم محسوب برمجياً؛ الذكاء الاصطناعي يشرح فقط، لا يخمّن أرقامك.",
         "w3": "عربي وسعودي أصيل", "w3d": "يفهم كشوف بنوكك، الزكاة، وسياقك المحلي — لا أداة أجنبية مترجمة.",
         "how_t": "كيف يعمل؟",
         "s1": "ارفع كشف حسابك", "s1d": "Excel أو PDF أو Word — أي صيغة فيها عملياتك.",
-        "s2": "نحلّل أرقامك", "s2d": "محرك يحسب الأرباح والمخاطر والاتجاهات في ثوانٍ.",
+        "s2": "نحلّل حركة نقدك", "s2d": "محرك يحسب تدفقك النقدي والمخاطر والاتجاهات في ثوانٍ.",
         "s3": "احصل على قرارك", "s3d": "تقرير واضح + توصيات تنفّذها هذا الأسبوع.",
-        "footer_tag": "المدير المالي — ذكاء مالي للشركات الصغيرة.",
-        "footer_disc": "الحسابات دقيقة؛ التقديرات المستقبلية افتراضية تعتمد على استمرار الاتجاه.",
+        "footer_tag": "المدير المالي — تحليل تدفق نقدي وكشف مخاطر للشركات الصغيرة.",
+        "footer_disc": "تحليل تدفق نقدي من كشف البنك، وليس صافي ربح محاسبي. أداة استرشادية لا تغني عن محاسب مختص. "
+                       "الحسابات النقدية دقيقة؛ التقديرات المستقبلية افتراضية تعتمد على استمرار الاتجاه.",
         "result": "تقريرك جاهز", "decision": "قرار هذا الأسبوع",
         "download": "تحميل التقرير الكامل (PDF)", "again": "تحليل ملف آخر",
-        "income": "الدخل", "expenses": "المصاريف", "net": "الصافي", "margin": "الهامش",
-        "safety": "مؤشر الأمان", "survival": "أيام بقاء السيولة", "savings": "توفير ممكن سنوياً",
-        "healthy": "وضع صحي", "caution": "مستقر — مع تحفّظات", "risk": "يحتاج تدخّل عاجل",
+        "income": "الوارد", "expenses": "الصادر", "net": "صافي التدفق", "margin": "نسبة الصافي",
+        "safety": "مؤشر الأمان النقدي", "survival": "أيام بقاء السيولة", "savings": "توفير ممكن سنوياً",
+        "healthy": "تدفق نقدي موجب", "caution": "مستقر — مع تحفّظات", "risk": "التدفق يحتاج تدخّلاً",
         "hidden": "المخاطر المخفية", "todo_t": "ماذا تفعل الآن", "payroll_t": "قراءة الرواتب",
-        "recurring_t": "الالتزامات الصامتة", "summary_t": "ملخص الوضع",
+        "recurring_t": "الالتزامات الصامتة", "summary_t": "ملخص الوضع النقدي",
+        "cashflow_note": "هذه أرقام تدفق نقدي من كشف البنك — وليست صافي ربح محاسبي.",
         "err_generic": "تعذّرت معالجة الملف. تأكد أنه يحتوي جدول عمليات واضح وحاول مرة أخرى.",
         "err_nofile": "اختر ملفاً أولاً.",
         "err_toobig": "الملف كبير جداً. الحد الأقصى 25 ميجابايت.",
@@ -380,26 +388,28 @@ def ui(lang):
         "f1": "Decision of the Week", "f1d": "The single most important money move this week, priced in SAR — act on it now.",
         "f2": "Survival Clock", "f2d": "How many days your cash lasts at today's spending — before you hit payroll.",
         "f3": "Bleed Detector", "f3d": "Exactly where your money leaks — top expense lines and who drains you most.",
-        "f4": "Payroll Read", "f4d": "Your total payroll and its share of revenue — and whether it threatens your cash.",
+        "f4": "Payroll Read", "f4d": "Your total payroll and its share of inflows — and whether it threatens your cash.",
         "f5": "Silent Commitments", "f5d": "Subscriptions and services auto-charging every month that you may have forgotten.",
-        "f6": "Safety Score", "f6d": "Your business health out of 100, plus the cushion: how much you can absorb before loss.",
+        "f6": "Cash Safety Score", "f6d": "Your cash-flow safety out of 100, plus the cushion: how far inflows can fall before cash flow turns negative.",
         "why_t": "Why The Financial Director?",
         "w1": "A decision, not numbers", "w1d": "We lead with this week's most important decision, priced in SAR — not pages of numbers.",
         "w2": "Exact by code, no guessing", "w2d": "Every figure computed in code; AI only explains — it never guesses your numbers.",
         "w3": "Truly Arabic & Saudi", "w3d": "It understands your bank statements, zakat, and local context — not a translated foreign tool.",
         "how_t": "How it works",
         "s1": "Upload your statement", "s1d": "Excel, PDF or Word — any format with your transactions.",
-        "s2": "We analyze your numbers", "s2d": "An engine computes profits, risks and trends in seconds.",
+        "s2": "We analyze your cash movement", "s2d": "An engine computes your cash flow, risks and trends in seconds.",
         "s3": "Get your decision", "s3d": "A clear report plus recommendations to act on this week.",
-        "footer_tag": "The Financial Director — financial intelligence for small business.",
-        "footer_disc": "Calculations are exact; forward estimates assume the current trend continues.",
+        "footer_tag": "The Financial Director — cash-flow analysis & risk detection for small business.",
+        "footer_disc": "A cash-flow analysis from your bank statement, not accounting net profit. A guidance tool, not a substitute "
+                       "for a qualified accountant. Cash figures are exact; forward estimates assume the current trend continues.",
         "result": "Your report is ready", "decision": "This week's decision",
         "download": "Download full report (PDF)", "again": "Analyze another file",
-        "income": "Income", "expenses": "Expenses", "net": "Net", "margin": "Margin",
-        "safety": "Safety score", "survival": "Cash survival days", "savings": "Possible yearly savings",
-        "healthy": "Healthy", "caution": "Stable — with caveats", "risk": "Needs urgent action",
+        "income": "Cash in", "expenses": "Cash out", "net": "Net cash flow", "margin": "Net ratio",
+        "safety": "Cash safety score", "survival": "Cash survival days", "savings": "Possible yearly savings",
+        "healthy": "Positive cash flow", "caution": "Stable — with caveats", "risk": "Cash flow needs action",
         "hidden": "Hidden risks", "todo_t": "What to do now", "payroll_t": "Payroll read",
-        "recurring_t": "Silent commitments", "summary_t": "Situation summary",
+        "recurring_t": "Silent commitments", "summary_t": "Cash situation summary",
+        "cashflow_note": "These are cash-flow figures from your bank statement — not accounting net profit.",
         "err_generic": "We couldn't process the file. Make sure it has a clear transactions table and try again.",
         "err_nofile": "Please choose a file first.",
         "err_toobig": "File is too large. Maximum size is 25 MB.",

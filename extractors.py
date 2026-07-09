@@ -66,39 +66,54 @@ _TX_BLOCK = re.compile(
     r"([\d,]+\.\d{2})\s*SAR\s+([\d,]+\.\d{2})\s*SAR\s+([\d,]+\.\d{2})\s*SAR"
     r"([^\n]*)\n(.*?)(\d{4}/\d{2}/\d{2})", re.DOTALL)
 
-# تصنيف عربي دلالي من نص العملية (وصف + تسمية البنك)
-_CAT_RULES = [
-    ("رواتب",        r"راتب|رواتب|payroll|salary"),
-    ("وقود",         r"محطة|وقود|بترول|fuel|petrol|aramco|الدريس|ساسكو"),
-    ("إيجار",        r"إيجار|ايجار|rent|عقار"),
-    ("تسويق وإعلان", r"إعلان|تسويق|سناب|snap|قوقل|google|meta|tiktok|twitter|ads"),
-    ("سداد فواتير",  r"سداد|فواتير|sadad|فاتورة|كهرباء|اتصالات|stc|موبايلي|زين"),
-    ("رسوم بنكية",   r"رسوم|عمولة|fee|charge|مصاريف بنك"),
-    ("نقاط بيع",     r"نقاط البيع|point of sale|pos|mada|شراء عبر|purchase"),
-    ("تحويلات",      r"تحويل|حوالة|transfer|toacct|fracct"),
-    ("إيداع نقدي",   r"إيداع|cash deposit|صراف"),
+# قاموس مصطلحات البنوك السعودية → (تصنيف عربي نظيف، طرف نظيف، هل هو "مصدر عام" لا عميل؟)
+# محلي بالكامل (بلا ذكاء اصطناعي خارجي) — حمايةً لخصوصية بيانات العميل (PDPL).
+# الترتيب من الأخص للأعم. "المصدر العام" = إيداع نقدي/تحويل/رسوم — ليس عميلاً يُخشى فقدانه.
+_TERM_RULES = [
+    (r"راتب|رواتب|payroll|salary",                              "رواتب",           None,                    False),
+    (r"محطة|وقود|fuel|petrol|الدريس|ساسكو|aramco|نفط",           "وقود ومحروقات",   "محطات وقود",            True),
+    (r"إيجار|ايجار|\brent\b|عقار",                               "إيجار",           "إيجار",                 True),
+    (r"سناب|snap|قوقل|google|meta|facebook|tiktok|إعلان|تسويق|ads", "تسويق وإعلان",  None,                    False),
+    (r"sadad|سداد|فواتير|فاتورة|كهرباء|اتصالات|\bstc\b|موبايلي|زين|مياه", "سداد فواتير", "سداد فواتير وخدمات", True),
+    (r"sancbk|\bncbk\b|رسوم|عمول|\bfee\b|\bvat\b|ضريب|charge|خدمات بنك|مصاريف بنك", "رسوم وضرائب", "رسوم وخدمات بنكية", True),
+    (r"نقاط البيع|point of sale|\bpos\b|mada|مدى|أثير|شراء عبر|purchase|pur\b", "مشتريات ونقاط بيع", "مشتريات ونقاط بيع", True),
+    (r"toacct|fracct|تحويل|transfer|حوال|\bto:|\bfr:",           "تحويلات",         "تحويلات بنكية",         True),
+    (r"cash deposit|إيداع|صراف|sanabil|نقدي|deposit",            "إيداع نقدي",      "إيداعات نقدية",         True),
 ]
 
+# تسميات المصادر العامة — تُستبعَد من تحليل "تركّز العملاء" (ليست عملاء يمكن فقدانهم).
+GENERIC_SOURCES = {"إيداعات نقدية", "تحويلات بنكية", "رسوم وخدمات بنكية",
+                   "مشتريات ونقاط بيع", "سداد فواتير وخدمات", "محطات وقود", "إيجار",
+                   "دخل غير مصنّف", "غير محدد"}
 
-def _categorize(blob: str, is_income: bool) -> str:
+
+def _clean_merchant(desc: str) -> str | None:
+    """اسم تاجر/جهة لاتيني نظيف من الوصف (للمشتريات والتحويلات المسمّاة)."""
+    if not desc:
+        return None
+    m = re.search(r"[A-Za-z][A-Za-z&'.\- ]{4,40}", desc)
+    if not m:
+        return None
+    name = re.sub(r"\s+", " ", m.group(0)).strip(" .,-")
+    skip = ("cash deposit", "online purchase", "the amount", "agmt", "toacct", "fracct")
+    return name[:40] if len(name) >= 4 and name.lower() not in skip else None
+
+
+def _classify(blob: str, desc: str, is_income: bool):
+    """يُرجع (التصنيف، الطرف) بلغة عربية نظيفة — بلا أكواد بنكية خام."""
     low = blob.lower()
-    for name, pat in _CAT_RULES:
+    for pat, cat, party, _generic in _TERM_RULES:
         if re.search(pat, low):
-            return name
-    return "مبيعات" if is_income else "مصروفات أخرى"
-
-
-def _extract_party(desc: str, label: str) -> str:
-    """أفضل تخمين للطرف: اسم تاجر إنجليزي أو جهة تحويل؛ وإلا تسمية العملية."""
-    if desc:
-        # اسم لاتيني (تاجر) — أطول تتابع حروف إنجليزية
-        m = re.search(r"[A-Za-z][A-Za-z&'. ]{4,40}", desc)
-        if m:
-            name = m.group(0).strip(" .,-")
-            skip = ("cash deposit", "online purchase", "the amount", "agmt")
-            if len(name) >= 4 and name.lower() not in skip:
-                return name[:40]
-    return (label or "").strip()[:40] or "غير محدد"
+            # الصراف الآلي: إيداع إن كان وارداً، وسحب نقدي إن كان صادراً
+            if cat == "إيداع نقدي" and not is_income:
+                return "سحب نقدي", "سحوبات نقدية"
+            if party is None:                          # رواتب/تسويق: نحاول استخراج اسم، وإلا التصنيف
+                party = _clean_merchant(desc) or cat
+            return cat, party
+    # غير معروف: تصنيف عام + محاولة اسم تاجر
+    if is_income:
+        return "دخل غير مصنّف", (_clean_merchant(desc) or "دخل غير مصنّف")
+    return "مصروفات أخرى", (_clean_merchant(desc) or "مصروفات أخرى")
 
 
 def _read_structured_pdf(path: str) -> pd.DataFrame:
@@ -107,11 +122,15 @@ def _read_structured_pdf(path: str) -> pd.DataFrame:
         import fitz  # PyMuPDF
     except ImportError:
         raise ExtractionError("PyMuPDF غير مثبّت")
+    import unicodedata
     rows = []
     doc = fitz.open(path)
     try:
         for pg in doc:
-            for m in _TX_BLOCK.finditer(pg.get_text()):
+            # تطبيع NFKC: يحوّل أشكال العرض العربية (ﺷﺮﺍﺀ) إلى عربي عادي (شراء)
+            # حتى تطابق قواعد التصنيف العربية. (بعض بنوك تخزّن النص مُشكّلاً مسبقاً.)
+            text = unicodedata.normalize("NFKC", pg.get_text())
+            for m in _TX_BLOCK.finditer(text):
                 _bal, cr, db, tail, desc, date = m.groups()
                 cr = float(cr.replace(",", "")); db = float(db.replace(",", ""))
                 if cr <= 0 and db <= 0:
@@ -119,12 +138,13 @@ def _read_structured_pdf(path: str) -> pd.DataFrame:
                 is_income = cr > 0
                 label = (tail or "").strip()
                 blob = f"{label} {desc or ''}"
+                cat, party = _classify(blob, desc, is_income)
                 rows.append({
                     "التاريخ": date.replace("/", "-"),
                     "البيان": re.sub(r"\s+", " ", blob).strip()[:120],
                     "النوع": "دخل" if is_income else "مصروف",
-                    "التصنيف": _categorize(blob, is_income),
-                    "الطرف": _extract_party(desc, label),
+                    "التصنيف": cat,
+                    "الطرف": party,
                     "المبلغ": cr if is_income else db,
                 })
     finally:

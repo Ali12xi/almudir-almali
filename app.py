@@ -159,8 +159,12 @@ def _view_model(a, lang):
                           if a.survival_days is not None else None),
         "salary_line": i18n.salary_sentence(a, lang) if a.salary_total > 0 else None,
         "recurring_line": i18n.recurring_sentence(a, lang) if a.recurring else None,
+        # وسادة التدفق: نعرضها كطمأنة حين تكون قوية/متوسطة، أو كتحذير حين يحترق النقد فعلاً.
+        # لا نعرض "0% انتبه" لحساب متوازن (داخل≈خارج) — تضليل بالنبرة.
         "resilience_line": (i18n.resilience_sentence(a, lang)
-                            if a.breakeven_drop_pct is not None else None),
+                            if a.breakeven_drop_pct is not None and
+                            (a.breakeven_drop_pct >= 0.10 or (a.runway and a.runway.get("burning")))
+                            else None),
         "buffer_line": i18n.buffer_sentence(a, lang) if a.buffer_months is not None else None,
         "runway_line": (i18n.runway_sentence(a.runway, lang)
                         if a.runway and a.runway.get("burning") else None),

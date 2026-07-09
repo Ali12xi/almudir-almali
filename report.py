@@ -16,10 +16,12 @@ from reportlab.pdfbase.ttfonts import TTFont
 
 import i18n
 
-# خطوط عربية مرفقة داخل المشروع (Tajawal) — تعمل على ويندوز ولينكس (Render) معاً.
+# خطوط عربية مرفقة (Amiri) — تحتوي أشكال العرض العربية كاملة، فتصيّر بلا حروف ناقصة.
+# (Tajawal الحديث يفتقد Presentation Forms مع arabic_reshaper فتظهر مربّعات.)
+# خط نسخي رسمي أنيق يليق بتقرير مالي، ويعمل على ويندوز ولينكس معاً.
 _FONT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts")
-pdfmetrics.registerFont(TTFont("Body", os.path.join(_FONT_DIR, "Tajawal-Regular.ttf")))
-pdfmetrics.registerFont(TTFont("Bold", os.path.join(_FONT_DIR, "Tajawal-Bold.ttf")))
+pdfmetrics.registerFont(TTFont("Body", os.path.join(_FONT_DIR, "Amiri-Regular.ttf")))
+pdfmetrics.registerFont(TTFont("Bold", os.path.join(_FONT_DIR, "Amiri-Bold.ttf")))
 
 NAVY = HexColor("#0F2A43"); GREEN = HexColor("#1D9A6C"); RED = HexColor("#C0392B")
 AMBER = HexColor("#E08E0B"); GRAY = HexColor("#6B7A8D"); LIGHT = HexColor("#F4F6F8")
@@ -200,8 +202,9 @@ class Report:
         self.chip(band_txt, band_col)
         self.y -= 22
         self.para(i18n.summary_sentence(a, self.lang), size=11)
-        # وسادة الأمان (نقطة التعادل) — تمييز دائم الظهور
-        if a.breakeven_drop_pct is not None:
+        # وسادة التدفق — نعرضها كطمأنة (قوية/متوسطة) أو تحذيراً عند احتراق فعلي فقط
+        _burning = bool(a.runway and a.runway.get("burning"))
+        if a.breakeven_drop_pct is not None and (a.breakeven_drop_pct >= 0.10 or _burning):
             cush_col = (GREEN if a.breakeven_drop_pct >= 0.30
                         else AMBER if a.breakeven_drop_pct >= 0.20 else RED)
             self.para(i18n.resilience_sentence(a, self.lang), size=11, color=cush_col)

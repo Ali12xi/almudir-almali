@@ -162,7 +162,10 @@ def _detect_recurring(a: Analysis, expense_df):
         if mean <= 0:
             continue
         cv = float(by_month.std(ddof=0)) / mean if mean else 1.0   # ثبات المبلغ
-        if cv <= 0.25:                                             # متكرر ومستقر
+        # حد أدنى: نتجاهل الالتزامات التافهة (تقلّل هيبة التقرير وغير متناسبة)،
+        # نسبياً مع حجم النشاط أو ≥50 ريال شهرياً أيّهما أعلى.
+        floor = max(50.0, 0.001 * a.total_expense)
+        if cv <= 0.25 and mean >= floor:                           # متكرر ومستقر وذو قيمة
             recurring.append({"party": party, "monthly": mean,
                               "yearly": mean * 12, "months": int(len(by_month))})
     recurring.sort(key=lambda r: r["yearly"], reverse=True)
@@ -180,23 +183,23 @@ def _compute_scores(a: Analysis):
     if a.runway and a.runway.get("burning"):
         a.survival_days = a.runway["days"]
 
-    # 3) مؤشر الأمان (0–100) — المخاطر البنيوية تغلب الربحية الآنية.
-    #    القاعدة: شركة رابحة لكن معلّقة على عميل واحد ليست "آمنة" — المؤشر يعكس ذلك.
+    # 3) مؤشر الأمان النقدي (0–100) — يعتمد على مخاطر نقدية حقيقية فقط.
+    #    ملاحظة محاسبية: صافي التدفق ~0 (داخل≈خارج) طبيعي لحساب تمرّ منه الأموال،
+    #    وليس "خسارة" — فلا نعاقب عليه، ولا نستخدم "الهامش" كإشارة أمان.
     score = 100.0
-    if a.net_profit < 0:
-        score -= 35                                            # خسارة فعلية
-    score += max(-15.0, min(10.0, a.avg_margin * 40))          # الهامش أثره محدود (لا يغطّي الخطر)
-    if a.income_by_customer:                                    # تركّز العملاء (أخطر عامل مفرد)
+    if a.income_by_customer:                                    # تركّز مصدر الوارد (أخطر عامل بنيوي)
         top = a.income_by_customer[0][2]
         score -= 40 if top >= 0.60 else 28 if top >= 0.45 else 15 if top >= 0.30 else 0
-    if a.survival_days is not None:                            # قِصَر مدى السيولة
+    if a.survival_days is not None:                            # احتراق نقدي فعلي (السيولة تنزل)
         d = a.survival_days
         score -= 35 if d < 30 else 22 if d < 60 else 10 if d < 120 else 0
-    if a.breakeven_drop_pct is not None:                       # رقّة وسادة الأمان
-        score -= 15 if a.breakeven_drop_pct < 0.10 else 8 if a.breakeven_drop_pct < 0.20 else 0
-    for f in a.findings:                                       # اتجاهات سلبية
+    elif a.runway and a.runway.get("burning"):                 # يحترق لكن الرصيد غير معروف
+        score -= 15
+    for f in a.findings:                                       # اتجاهات نقدية سلبية حقيقية
         if f["key"] in ("margin_erosion", "sales_up_profit_down"):
             score -= 12
+        elif f["key"] == "high_payroll":
+            score -= 8
     a.safety_score = int(max(5, min(99, round(score))))
     a.safety_band = ("high_risk" if a.safety_score < 45
                      else "medium" if a.safety_score < 75 else "good")
@@ -207,9 +210,12 @@ def _detect_findings(a: Analysis, income_df, expense_df):
     findings = []
     n_months = max(1, len(a.months))
 
-    # 1) تركّز العملاء
-    if a.income_by_customer:
-        name, amt, share = a.income_by_customer[0]
+    # 1) تركّز مصدر وارد حقيقي — نستبعد المصادر العامة (إيداع نقدي/تحويلات/رسوم):
+    #    الإيداع النقدي ليس "عميلاً" يُخشى فقدانه، بل مبيعات نقدية. لا ننذر خطأً.
+    real_sources = [(n, amt, sh) for (n, amt, sh) in a.income_by_customer
+                    if n not in extractors.GENERIC_SOURCES]
+    if real_sources:
+        name, amt, share = real_sources[0]
         if share >= 0.30:
             findings.append({
                 "key": "customer_concentration", "severity": "high",
@@ -255,8 +261,10 @@ def _detect_findings(a: Analysis, income_df, expense_df):
         spikes.sort(key=lambda f: f["sar"], reverse=True)
         findings.extend(spikes)
 
-    # 5) وسادة أمان رقيقة (نقطة التعادل قريبة) — خطر فقط حين تكون الوسادة ضيّقة
-    if a.breakeven_drop_pct is not None and a.net_profit >= 0 and a.breakeven_drop_pct < 0.20:
+    # 5) وسادة تدفق رقيقة — نُظهرها فقط عند احتراق نقدي فعلي (الرصيد ينزل).
+    #    صافي تدفق ~0 لحساب متوازن (داخل≈خارج) طبيعي، وليس خطراً — فلا ننذر عبثاً.
+    burning = bool(a.runway and a.runway.get("burning"))
+    if (burning and a.breakeven_drop_pct is not None and a.breakeven_drop_pct < 0.20):
         findings.append({
             "key": "thin_cushion",
             "severity": "high" if a.breakeven_drop_pct < 0.10 else "medium",
