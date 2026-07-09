@@ -59,6 +59,81 @@ class ExtractionError(Exception):
     pass
 
 
+# ---------- المحلّل الحتمي للكشوف المنظّمة (راجحي وما شابهه) ----------
+# نمط العملية: رصيد SAR | دائن SAR | مدين SAR | (تصنيف/وصف) | تاريخ YYYY/MM/DD
+# حتمي بالكامل: أي عدد صفحات في أقل من ثانية، بلا ذكاء اصطناعي، بلا استهلاك ذاكرة، مجاناً.
+_TX_BLOCK = re.compile(
+    r"([\d,]+\.\d{2})\s*SAR\s+([\d,]+\.\d{2})\s*SAR\s+([\d,]+\.\d{2})\s*SAR"
+    r"([^\n]*)\n(.*?)(\d{4}/\d{2}/\d{2})", re.DOTALL)
+
+# تصنيف عربي دلالي من نص العملية (وصف + تسمية البنك)
+_CAT_RULES = [
+    ("رواتب",        r"راتب|رواتب|payroll|salary"),
+    ("وقود",         r"محطة|وقود|بترول|fuel|petrol|aramco|الدريس|ساسكو"),
+    ("إيجار",        r"إيجار|ايجار|rent|عقار"),
+    ("تسويق وإعلان", r"إعلان|تسويق|سناب|snap|قوقل|google|meta|tiktok|twitter|ads"),
+    ("سداد فواتير",  r"سداد|فواتير|sadad|فاتورة|كهرباء|اتصالات|stc|موبايلي|زين"),
+    ("رسوم بنكية",   r"رسوم|عمولة|fee|charge|مصاريف بنك"),
+    ("نقاط بيع",     r"نقاط البيع|point of sale|pos|mada|شراء عبر|purchase"),
+    ("تحويلات",      r"تحويل|حوالة|transfer|toacct|fracct"),
+    ("إيداع نقدي",   r"إيداع|cash deposit|صراف"),
+]
+
+
+def _categorize(blob: str, is_income: bool) -> str:
+    low = blob.lower()
+    for name, pat in _CAT_RULES:
+        if re.search(pat, low):
+            return name
+    return "مبيعات" if is_income else "مصروفات أخرى"
+
+
+def _extract_party(desc: str, label: str) -> str:
+    """أفضل تخمين للطرف: اسم تاجر إنجليزي أو جهة تحويل؛ وإلا تسمية العملية."""
+    if desc:
+        # اسم لاتيني (تاجر) — أطول تتابع حروف إنجليزية
+        m = re.search(r"[A-Za-z][A-Za-z&'. ]{4,40}", desc)
+        if m:
+            name = m.group(0).strip(" .,-")
+            skip = ("cash deposit", "online purchase", "the amount", "agmt")
+            if len(name) >= 4 and name.lower() not in skip:
+                return name[:40]
+    return (label or "").strip()[:40] or "غير محدد"
+
+
+def _read_structured_pdf(path: str) -> pd.DataFrame:
+    """يقرأ كشوف البنوك المنظّمة (نمط راجحي) حتمياً وبسرعة عبر PyMuPDF."""
+    try:
+        import fitz  # PyMuPDF
+    except ImportError:
+        raise ExtractionError("PyMuPDF غير مثبّت")
+    rows = []
+    doc = fitz.open(path)
+    try:
+        for pg in doc:
+            for m in _TX_BLOCK.finditer(pg.get_text()):
+                _bal, cr, db, tail, desc, date = m.groups()
+                cr = float(cr.replace(",", "")); db = float(db.replace(",", ""))
+                if cr <= 0 and db <= 0:
+                    continue
+                is_income = cr > 0
+                label = (tail or "").strip()
+                blob = f"{label} {desc or ''}"
+                rows.append({
+                    "التاريخ": date.replace("/", "-"),
+                    "البيان": re.sub(r"\s+", " ", blob).strip()[:120],
+                    "النوع": "دخل" if is_income else "مصروف",
+                    "التصنيف": _categorize(blob, is_income),
+                    "الطرف": _extract_party(desc, label),
+                    "المبلغ": cr if is_income else db,
+                })
+    finally:
+        doc.close()
+    if len(rows) < 3:
+        raise ExtractionError("لم يُتعرّف على تنسيق كشف منظّم في هذا الـPDF.")
+    return pd.DataFrame(rows)[STD_COLS]
+
+
 # ---------- المُرسِل حسب نوع الملف ----------
 def _has_ai():
     return bool(os.environ.get("ANTHROPIC_API_KEY"))
@@ -88,16 +163,19 @@ def extract(path: str) -> pd.DataFrame:
     if ext in (".png", ".jpg", ".jpeg", ".webp", ".heic"):
         return extract_with_ai(path)
 
-    # PDF: نوجّه حسب الحجم — الصغير جدولياً حتمياً، الكبير عبر النص المقسّم المتوازي
+    # PDF: المحلّل الحتمي المنظّم أولاً (راجحي وشبهه) — سريع، أي حجم، مجاناً، بلا ذاكرة ثقيلة
     if ext == ".pdf":
+        try:
+            return _read_structured_pdf(path)
+        except ExtractionError:
+            pass   # ليس بالتنسيق المنظّم → نكمل للمسارات الأخرى
         n = _pdf_page_count(path)
         if n > _PDF_MAX_PAGES:
             raise ExtractionError(
-                f"كشفك كبير ({n} صفحة). للنتيجة الأدق والأسرع، ارفع كشف آخر شهر أو ربع "
-                "(هو الأهم للقرارات). وإن رغبت بتحليل الفترة كاملة، صدّره Excel من تطبيق بنكك — "
-                "يُعالَج فوراً مهما بلغ حجمه.")
+                f"كشفك كبير ({n} صفحة) وبتنسيق غير مُتعرَّف عليه. للنتيجة الأدق والأسرع، "
+                "ارفع كشف آخر شهر أو ربع، أو صدّره Excel من تطبيق بنكك — يُعالَج فوراً مهما بلغ حجمه.")
         if n > _PDF_DETERMINISTIC_MAX and _has_ai():
-            return extract_with_ai(path)   # كشف كبير → مسار النص المقسّم المتوازي مباشرة
+            return extract_with_ai(path)   # كشف صغير غير منظّم → مسار الذكاء الاصطناعي
 
     # الصيغ المهيكلة: نجرّب القراءة الحتمية أولاً، ونرجع للذكاء الاصطناعي عند الفشل
     try:
