@@ -66,7 +66,9 @@ def _has_ai():
 
 # حد صفحات الـPDF قابل للضبط بالبيئة: افتراضياً 60 (آمن لذاكرة الخطة المجانية 512MB).
 # الأكبر يُوجَّه لتصدير Excel (خفيف على الذاكرة، فوري). ارفعه على استضافة أكبر عبر PDF_MAX_PAGES.
-_PDF_MAX_PAGES = int(os.environ.get("PDF_MAX_PAGES", "80"))
+# حد آمن لذاكرة 512MB: أكبر من ذلك ينهار الخادم، فنعطي رسالة نظيفة فوراً بدل الانهيار.
+# يُرفع على استضافة أكبر عبر PDF_MAX_PAGES، أو يُلغى عملياً عند إضافة المحلّل الحتمي للجداول.
+_PDF_MAX_PAGES = int(os.environ.get("PDF_MAX_PAGES", "20"))
 _PDF_DETERMINISTIC_MAX = 5  # PDF أكبر من هذا يذهب مباشرة لمسار النص (أسرع من استخراج الجداول)
 
 
@@ -359,8 +361,8 @@ def _extract_text_via_ai(client, anthropic, text: str) -> list:
     def _one(ch):
         return _call_model(client, anthropic,
                            [{"type": "text", "text": "محتوى كشف الحساب (جزء):\n\n" + ch}])
-    # توازٍ محدود (3): يوازن بين السرعة وذاكرة الخطة المجانية (512MB) لتفادي 502
-    workers = int(os.environ.get("AI_WORKERS", "3"))
+    # توازٍ محدود (2): يوازن بين السرعة وذاكرة الخطة المجانية (512MB) لتفادي OOM/502
+    workers = int(os.environ.get("AI_WORKERS", "2"))
     rows = []
     with ThreadPoolExecutor(max_workers=min(len(chunks), workers)) as ex:
         for part in ex.map(_one, chunks):     # يحافظ على الترتيب ويرفع أي ExtractionError
