@@ -226,8 +226,9 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", "5000"))
     if "--serve" in sys.argv:
         from waitress import serve
-        # خيوط أكثر: مكالمات الذكاء الاصطناعي بطيئة (~30ث)، فنسمح بعدة عملاء معاً
-        threads = int(os.environ.get("THREADS", "12"))
+        # خيوط محدودة: الخطة المجانية 512MB؛ تزامن عالٍ يستنزف الذاكرة ويسبّب 502.
+        # 4 يكفي لعدة عملاء في مرحلة التجربة (كل تحليل ~20ث).
+        threads = int(os.environ.get("THREADS", "4"))
         log.info("waitress on http://0.0.0.0:%d (threads=%d)", port, threads)
         serve(app, host="0.0.0.0", port=port, threads=threads)
     else:

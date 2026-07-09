@@ -64,7 +64,9 @@ def _has_ai():
     return bool(os.environ.get("ANTHROPIC_API_KEY"))
 
 
-_PDF_MAX_PAGES = 400      # سقف السلامة؛ أبعد منه نوجّه لتصدير Excel (فوري بلا أي حد)
+# حد صفحات الـPDF قابل للضبط بالبيئة: افتراضياً 60 (آمن لذاكرة الخطة المجانية 512MB).
+# الأكبر يُوجَّه لتصدير Excel (خفيف على الذاكرة، فوري). ارفعه على استضافة أكبر عبر PDF_MAX_PAGES.
+_PDF_MAX_PAGES = int(os.environ.get("PDF_MAX_PAGES", "60"))
 _PDF_DETERMINISTIC_MAX = 5  # PDF أكبر من هذا يذهب مباشرة لمسار النص (أسرع من استخراج الجداول)
 
 
@@ -356,8 +358,10 @@ def _extract_text_via_ai(client, anthropic, text: str) -> list:
     def _one(ch):
         return _call_model(client, anthropic,
                            [{"type": "text", "text": "محتوى كشف الحساب (جزء):\n\n" + ch}])
+    # توازٍ محدود (3): يوازن بين السرعة وذاكرة الخطة المجانية (512MB) لتفادي 502
+    workers = int(os.environ.get("AI_WORKERS", "3"))
     rows = []
-    with ThreadPoolExecutor(max_workers=min(len(chunks), 8)) as ex:
+    with ThreadPoolExecutor(max_workers=min(len(chunks), workers)) as ex:
         for part in ex.map(_one, chunks):     # يحافظ على الترتيب ويرفع أي ExtractionError
             rows += part
     return rows
