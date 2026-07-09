@@ -66,7 +66,7 @@ def _has_ai():
 
 # حد صفحات الـPDF قابل للضبط بالبيئة: افتراضياً 60 (آمن لذاكرة الخطة المجانية 512MB).
 # الأكبر يُوجَّه لتصدير Excel (خفيف على الذاكرة، فوري). ارفعه على استضافة أكبر عبر PDF_MAX_PAGES.
-_PDF_MAX_PAGES = int(os.environ.get("PDF_MAX_PAGES", "60"))
+_PDF_MAX_PAGES = int(os.environ.get("PDF_MAX_PAGES", "80"))
 _PDF_DETERMINISTIC_MAX = 5  # PDF أكبر من هذا يذهب مباشرة لمسار النص (أسرع من استخراج الجداول)
 
 
@@ -91,8 +91,9 @@ def extract(path: str) -> pd.DataFrame:
         n = _pdf_page_count(path)
         if n > _PDF_MAX_PAGES:
             raise ExtractionError(
-                f"كشفك {n} صفحة — ضخم جداً كملف PDF. من تطبيق بنكك اختر «تصدير» واحفظه كـ "
-                "Excel أو CSV، وارفعه هنا — يُعالَج فوراً وبدقة مهما بلغ حجمه (آلاف الصفحات).")
+                f"كشفك كبير ({n} صفحة). للنتيجة الأدق والأسرع، ارفع كشف آخر شهر أو ربع "
+                "(هو الأهم للقرارات). وإن رغبت بتحليل الفترة كاملة، صدّره Excel من تطبيق بنكك — "
+                "يُعالَج فوراً مهما بلغ حجمه.")
         if n > _PDF_DETERMINISTIC_MAX and _has_ai():
             return extract_with_ai(path)   # كشف كبير → مسار النص المقسّم المتوازي مباشرة
 
