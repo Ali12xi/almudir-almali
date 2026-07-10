@@ -252,6 +252,23 @@ def savings_sentence(amount, lang) -> str:
     return f"Acting on the recommendations saves you about {money(amount,'en')} per year."
 
 
+def operating_note(a, lang) -> str | None:
+    """يوضّح بشفافية أن رأس المال/التمويل/السحوبات استُبعدت من الإيراد التشغيلي الحقيقي."""
+    if a.non_operating_in <= 0 and a.non_operating_out <= 0:
+        return None
+    if lang == "ar":
+        return (f"إيرادك التشغيلي الحقيقي {money(a.operating_income,'ar')} "
+                f"(بعد استبعاد {money(a.non_operating_in,'ar')} رأس مال/تمويل/تحويلات غامضة). "
+                f"ومصروفك التشغيلي {money(a.operating_expense,'ar')} "
+                f"(بعد استبعاد {money(a.non_operating_out,'ar')} سحوبات شخصية/سداد قروض/تحويلات داخلية). "
+                f"هذي الأرقام التشغيلية هي أساس كل التحليل أدناه — لا الإجمالي الخام.")
+    return (f"Your real operating income is {money(a.operating_income,'en')} "
+            f"(after excluding {money(a.non_operating_in,'en')} of capital/financing/ambiguous transfers). "
+            f"Operating expense is {money(a.operating_expense,'en')} "
+            f"(after excluding {money(a.non_operating_out,'en')} of owner draws/loan repayments/internal transfers). "
+            f"These operating figures are the basis for everything below — not the raw totals.")
+
+
 def payroll_summary(a, lang) -> str:
     """ملخص كشف الرواتب (وضع تحليل الرواتب)."""
     if lang == "ar":
@@ -271,12 +288,16 @@ def salary_sentence(a, lang) -> str:
 
 
 def recurring_sentence(a, lang) -> str:
-    """ملخص الالتزامات المتكررة الصامتة."""
+    """ملخص الالتزامات المتكررة الصامتة. الرقم السنوي تقدير مبني على استمرار
+    المعدل الحالي — نقولها صراحة (لا نعرضه كرقم مؤكد فوق بيانات قصيرة المدى)."""
+    monthly_total = sum(r["monthly"] for r in a.recurring)
     if lang == "ar":
-        return (f"رصدنا {len(a.recurring)} التزاماً متكرراً يُسحب تلقائياً بإجمالي "
-                f"~{money(a.recurring_yearly,'ar')} سنوياً — راجعها فقد يكون فيها ما لا تستخدمه.")
-    return (f"We found {len(a.recurring)} recurring auto-charges totaling "
-            f"~{money(a.recurring_yearly,'en')} per year — review them for anything you no longer use.")
+        return (f"رصدنا {len(a.recurring)} التزاماً متكرراً بإجمالي ~{money(monthly_total,'ar')} شهرياً "
+                f"(~{money(a.recurring_yearly,'ar')} سنوياً لو استمر بمعدله الحالي) — "
+                f"راجعها فقد يكون فيها ما لا تستخدمه.")
+    return (f"We found {len(a.recurring)} recurring commitments totaling ~{money(monthly_total,'en')}/month "
+            f"(~{money(a.recurring_yearly,'en')}/year if it continues at this rate) — "
+            f"review them for anything you no longer use.")
 
 
 # ---------- نصوص التقرير الثابتة ----------
@@ -386,6 +407,7 @@ def ui(lang):
         "recurring_t": "الالتزامات الصامتة", "summary_t": "ملخص الوضع النقدي",
         "cashflow_note": "هذه أرقام تدفق نقدي من كشف البنك — وليست صافي ربح محاسبي.",
         "payroll_mode": "تحليل الرواتب", "employees_t": "كشف الموظفين",
+        "non_op_t": "تدفقات غير تشغيلية (مستبعدة من التحليل أعلاه)",
         "payroll_income_tip": "أدخل دخلك الشهري في خانة الرصيد لتعرف نسبة الرواتب من الدخل.",
         "err_generic": "تعذّرت معالجة الملف. تأكد أنه يحتوي جدول عمليات واضح وحاول مرة أخرى.",
         "err_nofile": "اختر ملفاً أولاً.",
@@ -456,6 +478,7 @@ def ui(lang):
         "recurring_t": "Silent commitments", "summary_t": "Cash situation summary",
         "cashflow_note": "These are cash-flow figures from your bank statement — not accounting net profit.",
         "payroll_mode": "Payroll analysis", "employees_t": "Employees",
+        "non_op_t": "Non-operating flows (excluded from the analysis above)",
         "payroll_income_tip": "Enter your monthly income in the balance field to see payroll-to-income ratio.",
         "err_generic": "We couldn't process the file. Make sure it has a clear transactions table and try again.",
         "err_nofile": "Please choose a file first.",

@@ -202,6 +202,9 @@ class Report:
         self.chip(band_txt, band_col)
         self.y -= 22
         self.para(i18n.summary_sentence(a, self.lang), size=11)
+        note = i18n.operating_note(a, self.lang)
+        if note:
+            self.space(2); self.para(note, size=9.5, color=GRAY, leading=4)
         # وسادة التدفق — نعرضها كطمأنة (قوية/متوسطة) أو تحذيراً عند احتراق فعلي فقط
         _burning = bool(a.runway and a.runway.get("burning"))
         if a.breakeven_drop_pct is not None and (a.breakeven_drop_pct >= 0.10 or _burning):
@@ -242,9 +245,20 @@ class Report:
         if a.recurring:
             self.section_title(self.R["recurring"], AMBER)
             self.para(i18n.recurring_sentence(a, self.lang), size=10.5, color=NAVY, gap=2)
-            for r in a.recurring[:5]:
-                self.bar(r["party"], r["yearly"], min(1.0, r["yearly"] / max(a.recurring_yearly, 1)),
-                         AMBER)
+            # نعرض المعدل الشهري الفعلي (لا التسنين ×12) — أصدق لمشاهدات قصيرة المدى
+            top_m = max((r["monthly"] for r in a.recurring), default=1)
+            for r in a.recurring:
+                self.bar(r["party"], r["monthly"], min(1.0, r["monthly"] / max(top_m, 1)), AMBER)
+        self.hline()
+
+    def non_operating(self, a):
+        if not a.non_operating_items:
+            return
+        self.section_title(i18n.ui(self.lang)["non_op_t"], GRAY)
+        top = max((amt for _, amt, _ in a.non_operating_items), default=1)
+        for cat, amt, direction in a.non_operating_items[:8]:
+            col = GREEN if direction == "دخل" else RED
+            self.bar(cat, amt, amt / top if top else 0, col)
         self.hline()
 
     def risks(self, a):
@@ -303,7 +317,8 @@ class Report:
             self.risks(a); self.todo(a); self.footer()
         else:
             self.cover(a); self.overview(a); self.earn_bleed(a)
-            self.payroll_recurring(a); self.risks(a); self.todo(a); self.footer()
+            self.payroll_recurring(a); self.non_operating(a)
+            self.risks(a); self.todo(a); self.footer()
         self.c.save()
 
 

@@ -86,6 +86,7 @@
     </div>
 
     <p class="cashnote"><i>ℹ️</i> {{ t.cashflow_note }}</p>
+    {% if vm.operating_note %}<p class="cashnote"><i>ℹ️</i> {{ vm.operating_note }}</p>{% endif %}
 
     <div class="center">
       {% set chip_cls = 'green' if a.safety_band=='good' else ('amber' if a.safety_band=='medium' else 'red') %}
@@ -106,6 +107,15 @@
       {% if vm.recurring_line %}
       <div class="read"><div class="read-h">{{ t.recurring_t }}</div><p>{{ vm.recurring_line }}</p></div>
       {% endif %}
+    </div>
+    {% endif %}
+
+    {% if vm.non_operating_items %}
+    <div class="risks">
+      <h3>{{ t.non_op_t }}</h3>
+      {% for cat, amt, direction in vm.non_operating_items %}
+      <div class="r">{{ cat }} — {{ "{:,.0f}".format(amt) }} ({{ direction }})</div>
+      {% endfor %}
     </div>
     {% endif %}
 

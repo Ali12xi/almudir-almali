@@ -103,6 +103,50 @@ GENERIC_SOURCES = {"إيداعات نقدية", "تحويلات بنكية", "ر
                    "مشتريات ونقاط بيع", "سداد فواتير وخدمات", "محطات وقود", "إيجار",
                    "دخل غير مصنّف", "غير محدد"}
 
+# ---------- طبقة "تشغيلي مقابل غير تشغيلي" (فخ الربح الجوهري) ----------
+# رأس المال، التمويل، سحوبات المالك، سداد القروض، التحويلات الداخلية، وتحصيل الضريبة
+# ليست دخلاً أو مصروفاً تشغيلياً — تُقلب المؤشرات (تركّز عملاء مخفّف، هامش كاذب) لو خُلطت.
+# محلي بالكامل (regex)، يُطبَّق على أي بيانات مستخرجة بغضّ النظر عن مصدرها (AI أو حتمي).
+NON_OPERATING = {"رأس مال", "تمويل بنكي", "سحب شخصي (المالك)", "سداد تمويل",
+                 "تحويل داخلي بين الحسابات", "ضريبة محصّلة (تحصيل لا مصروف)"}
+
+_NON_OP_RULES = [
+    (r"رأس\s*مال|capital\s*injection|استثمار من الشريك|إيداع رأس مال", "رأس مال", True),
+    (r"تمويل\s*بنكي|تمويل من|bank financing|loan disbursement|قرض\s*جديد", "تمويل بنكي", True),
+    (r"سحب\s*شخصي|سحب\s*الشريك|owner draw|مسحوبات شخصية", "سحب شخصي (المالك)", False),
+    (r"سداد\s*قسط\s*تمويل|سداد\s*قرض|قسط\s*تمويل|loan\s*(?:installment|repayment)", "سداد تمويل", False),
+    # محدَّد بدقة: تحويل المالك بين حساباته/حسابات مؤسسته الخاصة — لا "التحويل الداخلي"
+    # كمصطلح بنكي عام (بعض البنوك تستخدمه لأي تحويل بين عملائها، وهذا دخل حقيقي).
+    (r"لحساب\s*(?:المؤسسة|الشركة)\s*(?:الآخر|الثاني)|بين\s*حسابات\s*(?:المؤسسة|الشركة)|"
+     r"لحسابي\s*الآخر|internal\s*transfer\s*between\s*(?:own|company)\s*accounts",
+     "تحويل داخلي بين الحسابات", False),
+    (r"ضريبة القيمة المضافة|zatca|هيئة الزكاة|vat remit", "ضريبة محصّلة (تحصيل لا مصروف)", False),
+]
+
+
+def tag_non_operating(df: pd.DataFrame) -> pd.DataFrame:
+    """يعيد تصنيف الصفوف غير التشغيلية (رأس مال/تمويل/سحوبات/سداد قروض/تحويل داخلي/ضريبة)
+    بغضّ النظر عن مصدر الاستخراج — طبقة موحّدة تُطبَّق على أي بيانات بعد الاستخراج."""
+    if df.empty:
+        return df
+    blob = (df["البيان"].astype(str) + " " + df["الطرف"].astype(str)).str.lower()
+    for pat, cat, _is_income in _NON_OP_RULES:
+        mask = blob.str.contains(pat, regex=True, case=False, na=False)
+        if mask.any():
+            df.loc[mask, "التصنيف"] = cat
+            df.loc[mask, "الطرف"] = cat
+    # تحويلات واردة غامضة (IPS أو "تحويل وارد" بلا اسم جهة حقيقي) — نكتشفها من النص
+    # مباشرة (بغضّ النظر عن تسمية التصنيف، اللي تختلف بين الذكاء الاصطناعي والمحلّل الحتمي).
+    # نتحقق من وجود اسم جهة حقيقي (شركة/مؤسسة أو اسم تاجر لاتيني نظيف)، لا أي كلمة إنجليزية.
+    has_named_entity = blob.str.contains(r"شركة|مؤسسة|مجموعة", regex=True, case=False, na=False)
+    has_merchant = df["الطرف"].apply(lambda p: _clean_merchant(str(p)) is not None)
+    vague_pat = r"\bips\b|تحويل\s*وارد|طرف خارجي|غير محدد"
+    is_vague_desc = blob.str.contains(vague_pat, regex=True, case=False, na=False)
+    vague_in = (df["النوع"] == "دخل") & is_vague_desc & ~has_named_entity & ~has_merchant
+    df.loc[vague_in, "التصنيف"] = "تحويل وارد غامض (غير تشغيلي)"
+    df.loc[vague_in, "الطرف"] = "تحويل وارد غامض (غير تشغيلي)"
+    return df
+
 
 def _clean_merchant(desc: str) -> str | None:
     """اسم تاجر/جهة لاتيني نظيف من الوصف (للمشتريات والتحويلات المسمّاة)."""
@@ -196,6 +240,17 @@ def _pdf_page_count(path: str) -> int:
 
 
 def extract(path: str) -> pd.DataFrame:
+    """يستخرج العمليات ثم يطبّق طبقة 'تشغيلي مقابل غير تشغيلي' على أي مصدر
+    (AI أو حتمي) — طبقة موحّدة لا تعتمد على مسار الاستخراج."""
+    df = _extract_inner(path)
+    ftype = df.attrs.get("ftype", "statement")
+    if ftype == "statement":                 # الرواتب/الميزانية لهما منطق مختلف مسبقاً
+        df = tag_non_operating(df)
+    df.attrs["ftype"] = ftype
+    return df
+
+
+def _extract_inner(path: str) -> pd.DataFrame:
     ext = os.path.splitext(path)[1].lower()
 
     # الصور دائماً عبر الذكاء الاصطناعي

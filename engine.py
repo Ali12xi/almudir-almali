@@ -42,6 +42,14 @@ class Analysis:
     salary_count: int = 0            # عدد المستفيدين المميّزين (تقدير الموظفين)
     recurring: list = field(default_factory=list)  # [{party, monthly, yearly, months}] التزامات متكررة
     recurring_yearly: float = 0.0    # إجمالي الالتزامات المتكررة سنوياً
+    # --- تشغيلي مقابل غير تشغيلي (فخ الربح الجوهري) ---
+    # رأس المال/التمويل/سحوبات المالك/سداد القروض/التحويل الداخلي ليست دخلاً أو مصروفاً
+    # تشغيلياً — نستبعدها من التركّز والنسب، ونعرضها بشفافية في قسم منفصل.
+    operating_income: float = 0.0
+    operating_expense: float = 0.0
+    non_operating_in: float = 0.0
+    non_operating_out: float = 0.0
+    non_operating_items: list = field(default_factory=list)  # [(category, amount, direction)]
     # --- توجيه النوع (تحليل مخصّص لكل ملف) ---
     ftype: str = "statement"         # statement | payroll | budget
     employees: list = field(default_factory=list)  # [(name, amount, share)] كشف رواتب
@@ -99,20 +107,11 @@ def analyze(path: str, current_cash: float | None = None) -> Analysis:
     net_profit = total_income - total_expense
     avg_margin = (net_profit / total_income) if total_income else 0.0
 
-    by_cust = income_df.groupby("الطرف")["المبلغ"].sum().sort_values(ascending=False)
-    income_by_customer = [(str(n), float(v), float(v) / total_income if total_income else 0.0)
-                          for n, v in by_cust.items()]
-
-    by_cat = expense_df.groupby("التصنيف")["المبلغ"].sum().sort_values(ascending=False)
-    expense_by_category = [(str(c), float(v), float(v) / total_expense if total_expense else 0.0)
-                           for c, v in by_cat.items()]
-
     a = Analysis(
         n_transactions=len(df), months=months,
         total_income=total_income, total_expense=total_expense,
         net_profit=net_profit, avg_margin=avg_margin,
-        income_by_customer=income_by_customer,
-        expense_by_category=expense_by_category,
+        income_by_customer=[], expense_by_category=[],
     )
     a.ftype = df.attrs.get("ftype", "statement")
     n = max(1, len(months))
@@ -124,10 +123,42 @@ def analyze(path: str, current_cash: float | None = None) -> Analysis:
         _analyze_payroll_file(a, expense_df, current_cash)
         return a
 
-    # وسادة الأمان: كم يتحمّل انخفاض الوارد قبل نقطة التعادل (= نسبة الصافي)
+    # فخ الربح الجوهري: نستبعد رأس المال/التمويل/سحوبات المالك/سداد القروض/
+    # التحويل الداخلي/التحصيل الضريبي من التركّز والنسب التشغيلية — بشفافية كاملة
+    # (تُعرض في قسم منفصل، لا تُخفى، لكنها لا تشوّه "الإيراد الحقيقي").
+    non_op = extractors.NON_OPERATING | {"تحويل وارد غامض (غير تشغيلي)"}
+    op_income_df = income_df[~income_df["التصنيف"].isin(non_op)]
+    op_expense_df = expense_df[~expense_df["التصنيف"].isin(extractors.NON_OPERATING)]
+    a.operating_income = float(op_income_df["المبلغ"].sum())
+    a.operating_expense = float(op_expense_df["المبلغ"].sum())
+    a.non_operating_in = total_income - a.operating_income
+    a.non_operating_out = total_expense - a.operating_expense
+
+    non_op_rows = pd.concat([
+        income_df[income_df["التصنيف"].isin(non_op)],
+        expense_df[expense_df["التصنيف"].isin(extractors.NON_OPERATING)],
+    ])
+    if not non_op_rows.empty:
+        grp = non_op_rows.groupby(["التصنيف", "النوع"])["المبلغ"].sum()
+        a.non_operating_items = sorted(
+            [(str(cat), float(v), "دخل" if typ == "دخل" else "مصروف")
+             for (cat, typ), v in grp.items()], key=lambda x: -x[1])
+
+    by_cust = op_income_df.groupby("الطرف")["المبلغ"].sum().sort_values(ascending=False)
+    a.income_by_customer = [(str(n), float(v), float(v) / a.operating_income if a.operating_income else 0.0)
+                            for n, v in by_cust.items()]
+
+    by_cat = op_expense_df.groupby("التصنيف")["المبلغ"].sum().sort_values(ascending=False)
+    a.expense_by_category = [(str(c), float(v), float(v) / a.operating_expense if a.operating_expense else 0.0)
+                             for c, v in by_cat.items()]
+
+    # وسادة الأمان: كم يتحمّل انخفاض الوارد التشغيلي قبل نقطة التعادل — نستخدم
+    # الأرقام التشغيلية (لا الإجمالي) حتى لا يخفي تمويل/رأس مال لمرة واحدة الخطر الحقيقي.
+    avg_monthly_op_income = a.operating_income / n
+    avg_monthly_op_expense = a.operating_expense / n
     a.breakeven_drop_pct = (
-        (a.avg_monthly_income - a.avg_monthly_expense) / a.avg_monthly_income
-        if a.avg_monthly_income > 0 else None)
+        (avg_monthly_op_income - avg_monthly_op_expense) / avg_monthly_op_income
+        if avg_monthly_op_income > 0 else None)
 
     _analyze_payroll(a, expense_df)
     _detect_recurring(a, expense_df)
@@ -192,7 +223,9 @@ def _analyze_payroll(a: Analysis, expense_df):
     n = max(1, len(a.months))
     a.salary_total = float(sal["المبلغ"].sum())
     a.salary_monthly = a.salary_total / n
-    a.salary_ratio = (a.salary_total / a.total_income) if a.total_income else 0.0
+    # النسبة من الإيراد التشغيلي الحقيقي — لا الإجمالي (رأس مال/تمويل يخفّض النسبة كذباً)
+    base = a.operating_income or a.total_income
+    a.salary_ratio = (a.salary_total / base) if base else 0.0
     a.salary_count = int(sal["الطرف"].astype(str).str.strip().replace("", "غير محدد").nunique())
 
 
@@ -207,7 +240,9 @@ def _detect_recurring(a: Analysis, expense_df):
     essential = _SALARY_RE + "|إيجار|ايجار|rent|كهرباء|ماء|مياه|مرافق|water|electric|اتصالات|إنترنت|انترنت|internet"
     ess_mask = (expense_df["التصنيف"].astype(str).str.contains(essential, regex=True, case=False)
                 | expense_df["البيان"].astype(str).str.contains(essential, regex=True, case=False))
-    ex = expense_df[~ess_mask]
+    # نستبعد غير التشغيلي (سداد قروض/تحويل داخلي/ضريبة) — ليست "التزامات صامتة" بل معروفة ومقصودة
+    non_op_mask = expense_df["التصنيف"].isin(extractors.NON_OPERATING)
+    ex = expense_df[~ess_mask & ~non_op_mask]
     recurring = []
     for party, g in ex.groupby(ex["الطرف"].astype(str)):
         by_month = g.groupby("ym")["المبلغ"].sum()
@@ -217,14 +252,13 @@ def _detect_recurring(a: Analysis, expense_df):
         if mean <= 0:
             continue
         cv = float(by_month.std(ddof=0)) / mean if mean else 1.0   # ثبات المبلغ
-        # حد أدنى: نتجاهل الالتزامات التافهة (تقلّل هيبة التقرير وغير متناسبة)،
-        # نسبياً مع حجم النشاط أو ≥50 ريال شهرياً أيّهما أعلى.
-        floor = max(50.0, 0.001 * a.total_expense)
-        if cv <= 0.25 and mean >= floor:                           # متكرر ومستقر وذو قيمة
+        # حد أدنى ثابت بسيط: يستبعد ضجيج التقريب فقط، لا الاشتراكات الصغيرة الحقيقية
+        # (اشتراك بـ92 ريال شهرياً "خفي" وضار تراكمياً — لا نتجاهله لحجم المصاريف الكلي).
+        if cv <= 0.25 and mean >= 30.0:                             # متكرر ومستقر وذو قيمة
             recurring.append({"party": party, "monthly": mean,
                               "yearly": mean * 12, "months": int(len(by_month))})
     recurring.sort(key=lambda r: r["yearly"], reverse=True)
-    a.recurring = recurring[:6]
+    a.recurring = recurring[:10]
     a.recurring_yearly = sum(r["yearly"] for r in recurring)
 
 

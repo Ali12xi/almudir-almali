@@ -194,6 +194,8 @@ def _view_model(a, lang):
                           if a.survival_days is not None else None),
         "salary_line": i18n.salary_sentence(a, lang) if a.salary_total > 0 else None,
         "recurring_line": i18n.recurring_sentence(a, lang) if a.recurring else None,
+        "operating_note": i18n.operating_note(a, lang),
+        "non_operating_items": a.non_operating_items,
         # وسادة التدفق: نعرضها كطمأنة حين تكون قوية/متوسطة، أو كتحذير حين يحترق النقد فعلاً.
         # لا نعرض "0% انتبه" لحساب متوازن (داخل≈خارج) — تضليل بالنبرة.
         "resilience_line": (i18n.resilience_sentence(a, lang)
