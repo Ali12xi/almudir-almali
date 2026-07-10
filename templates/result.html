@@ -23,6 +23,33 @@
   <main class="wrap">
     <h1 class="rtitle">{{ t.result }} — {{ company }}</h1>
 
+    {% if vm.ftype == 'payroll' %}
+    <div class="decision">
+      <div class="kicker">{{ t.payroll_mode }}</div>
+      <div class="head">{{ vm.payroll_summary }}</div>
+    </div>
+    {% if vm.risks %}
+    <div class="risks">
+      <h3>{{ t.hidden }}</h3>
+      {% for r in vm.risks %}<div class="r"><strong>{{ r.title }}:</strong> {{ r.text }}</div>{% endfor %}
+    </div>
+    {% endif %}
+    <div class="risks">
+      <h3>{{ t.employees_t }}</h3>
+      {% for name, amt, sh in vm.employees %}
+      <div class="r">{{ name }} — {{ "{:,.0f}".format(amt) }} ({{ "%.0f"|format(sh*100) }}%)</div>
+      {% endfor %}
+    </div>
+    {% if vm.recs %}
+    <div class="risks todo">
+      <h3>{{ t.todo_t }}</h3>
+      {% for r in vm.recs %}<div class="r num">{{ loop.index }}. {{ r }}</div>{% endfor %}
+    </div>
+    {% endif %}
+    <p class="cashnote"><i>ℹ️</i> {{ t.payroll_income_tip }}</p>
+
+    {% else %}
+
     {% if vm.decision_head %}
     <div class="decision">
       <div class="kicker">{{ t.decision }}</div>
@@ -95,6 +122,8 @@
       {% for r in vm.recs %}<div class="r num">{{ loop.index }}. {{ r }}</div>{% endfor %}
       {% if vm.savings_line %}<div class="savings-line">{{ vm.savings_line }}</div>{% endif %}
     </div>
+    {% endif %}
+
     {% endif %}
 
     <a class="dl" href="{{ url_for('download', uid=uid) }}">↓ {{ t.download }}</a>

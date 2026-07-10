@@ -45,8 +45,8 @@ SYN = {
     "البيان": ["البيان", "بيان", "الوصف", "وصف", "تفاصيل", "description", "details", "narration", "memo", "notes"],
     "النوع": ["النوع", "نوع", "type", "dr/cr", "debit/credit"],
     "التصنيف": ["التصنيف", "تصنيف", "البند", "الفئة", "category", "class", "account"],
-    "الطرف": ["الطرف", "الجهة", "العميل", "المورد", "الاسم", "party", "customer", "vendor", "name", "payee", "beneficiary"],
-    "المبلغ": ["المبلغ", "مبلغ", "القيمة", "قيمة", "amount", "value", "total"],
+    "الطرف": ["الطرف", "الجهة", "العميل", "المورد", "الاسم", "اسم الموظف", "party", "customer", "vendor", "name", "employee", "payee", "beneficiary"],
+    "المبلغ": ["المبلغ", "مبلغ", "القيمة", "قيمة", "amount", "value", "total", "الراتب", "راتب", "salary", "أجر", "wage", "الفعلي", "actual", "المصروف"],
     # أعمدة مساعدة لاشتقاق النوع/المبلغ
     "_مدين": ["مدين", "debit", "withdrawal", "سحب", "منصرف"],
     "_دائن": ["دائن", "credit", "deposit", "إيداع", "وارد"],
@@ -57,6 +57,23 @@ INCOME_HINT = re.compile(r"دخل|إيراد|مبيع|إيداع|وارد|دائ
 
 class ExtractionError(Exception):
     pass
+
+
+# ---------- كشف نوع الملف (يوجّه لتحليل مخصّص لكل نوع) ----------
+def detect_ftype(columns) -> str:
+    """يصنّف الملف من رؤوس الأعمدة: statement | payroll | budget.
+    الافتراضي statement (يشمل كشوف الحساب وقوائم المصروفات — تحليل تدفق نقدي)."""
+    cols = " ".join(str(c).strip().lower() for c in columns)
+    def has(*ws): return any(w in cols for w in ws)
+    # كشف رواتب: اسم/موظف + راتب/أجر
+    if has("راتب", "salary", "أجر", "wage", "payroll") and \
+       has("موظف", "employee", "staff", "الاسم", "اسم", "name"):
+        return "payroll"
+    # ميزانية/موازنة: مخطط + فعلي، أو كلمة موازنة/budget
+    if (has("مخطط", "planned", "متوقع", "forecast", "الموازنة", "موازنة", "budget") and
+            has("فعلي", "actual")) or has("موازنة", "budget"):
+        return "budget"
+    return "statement"
 
 
 # ---------- المحلّل الحتمي للكشوف المنظّمة (راجحي وما شابهه) ----------
@@ -151,7 +168,9 @@ def _read_structured_pdf(path: str) -> pd.DataFrame:
         doc.close()
     if len(rows) < 3:
         raise ExtractionError("لم يُتعرّف على تنسيق كشف منظّم في هذا الـPDF.")
-    return pd.DataFrame(rows)[STD_COLS]
+    out = pd.DataFrame(rows)[STD_COLS]
+    out.attrs["ftype"] = "statement"
+    return out
 
 
 # ---------- المُرسِل حسب نوع الملف ----------
@@ -271,10 +290,21 @@ def _normalize(df: pd.DataFrame, source: str) -> pd.DataFrame:
     out["النوع"] = out["النوع"].apply(
         lambda s: "دخل" if INCOME_HINT.search(str(s)) else ("مصروف" if str(s).strip() else "مصروف"))
 
+    # نوع الملف يوجّه التحليل. الرواتب والميزانية = مصروفات/التزامات (تدفق خارج).
+    ftype = detect_ftype(cols)
+    if ftype == "payroll":
+        out["النوع"] = "مصروف"
+        if "التصنيف" not in mapping:
+            out["التصنيف"] = "رواتب"
+    elif ftype == "budget":
+        out["النوع"] = "مصروف"
+
     out = out[out["المبلغ"] > 0].reset_index(drop=True)
     if out.empty:
         raise ExtractionError("الجدول لا يحتوي على مبالغ صالحة.")
-    return out[STD_COLS]
+    out = out[STD_COLS]
+    out.attrs["ftype"] = ftype
+    return out
 
 
 # ---------- قرّاء الصيغ ----------

@@ -147,8 +147,18 @@ def analyze():
 
 def _view_model(a, lang):
     """نُصيّر نصوص التحليل مرة واحدة هنا (تبقى القوالب نظيفة)."""
+    if a.ftype == "payroll":                      # وضع تحليل الرواتب (تخطيط مختلف)
+        return {
+            "ftype": "payroll",
+            "payroll_summary": i18n.payroll_summary(a, lang),
+            "employees": a.employees[:12],
+            "risks": [{"title": i18n.finding_title(f, lang), "text": i18n.finding_text(f, lang)}
+                      for f in a.findings],
+            "recs": [i18n.rec_text(r, lang) for r in a.recommendations],
+        }
     band_txt = {"good": "healthy", "medium": "caution", "high_risk": "risk"}[a.safety_band]
     vm = {
+        "ftype": "statement",
         "decision_head": None, "decision_detail": None,
         "summary": i18n.summary_sentence(a, lang),
         "status_key": band_txt, "safety_label": i18n.safety_label(a.safety_band, lang),

@@ -253,7 +253,7 @@ class Report:
         self.section_title(self.R["risks"], AMBER)
         for f in a.findings:
             self.need(30)
-            col = RED if f["severity"] == "high" else AMBER
+            col = RED if f.get("severity") == "high" else AMBER
             self.chip(i18n.finding_title(f, self.lang), col); self.y -= 19
             self.para(i18n.finding_text(f, self.lang), size=10.5, leading=5, gap=1)
         self.hline()
@@ -280,9 +280,30 @@ class Report:
         self.space(10); self.hline()
         self.para(self.R["footer"], size=8.5, color=GRAY)
 
+    def payroll_cover(self, a):
+        c = self.c
+        c.setFillColor(NAVY); c.rect(0, PAGE_H - 40 * mm, PAGE_W, 40 * mm, fill=1, stroke=0)
+        self.y = PAGE_H - 18 * mm
+        self.lead_text(self.R["brand"], 22, "Bold", WHITE); self.y -= 22
+        self.lead_text(f"{self.R['report_of']} {self.company} · {i18n.ui(self.lang)['payroll_mode']}",
+                       11, "Body", MUTE)
+        self.y = PAGE_H - 52 * mm
+        self.para(i18n.payroll_summary(a, self.lang), size=13, font="Bold")
+
+    def payroll_employees(self, a):
+        self.section_title(i18n.ui(self.lang)["employees_t"], NAVY)
+        top = a.employees[0][1] if a.employees else 1
+        for name, amt, share in a.employees[:12]:
+            self.bar(name, amt, (amt / top) if top else 0, NAVY)
+        self.hline()
+
     def build(self, a):
-        self.cover(a); self.overview(a); self.earn_bleed(a)
-        self.payroll_recurring(a); self.risks(a); self.todo(a); self.footer()
+        if a.ftype == "payroll":
+            self.payroll_cover(a); self.payroll_employees(a)
+            self.risks(a); self.todo(a); self.footer()
+        else:
+            self.cover(a); self.overview(a); self.earn_bleed(a)
+            self.payroll_recurring(a); self.risks(a); self.todo(a); self.footer()
         self.c.save()
 
 

@@ -42,6 +42,10 @@ class Analysis:
     salary_count: int = 0            # عدد المستفيدين المميّزين (تقدير الموظفين)
     recurring: list = field(default_factory=list)  # [{party, monthly, yearly, months}] التزامات متكررة
     recurring_yearly: float = 0.0    # إجمالي الالتزامات المتكررة سنوياً
+    # --- توجيه النوع (تحليل مخصّص لكل ملف) ---
+    ftype: str = "statement"         # statement | payroll | budget
+    employees: list = field(default_factory=list)  # [(name, amount, share)] كشف رواتب
+    avg_salary: float = 0.0          # متوسط الراتب (لقرار التوظيف)
 
     @property
     def first_ym(self):
@@ -60,12 +64,19 @@ class Analysis:
 
 def load_ledger(path: str) -> pd.DataFrame:
     df = extractors.extract(path)                     # طبقة موحّدة لكل الصيغ
+    ftype = df.attrs.get("ftype", "statement")        # نوع الملف (يوجّه التحليل)
     df["التاريخ"] = pd.to_datetime(df["التاريخ"], errors="coerce")
     df["المبلغ"] = pd.to_numeric(df["المبلغ"], errors="coerce").fillna(0.0)
-    df = df.dropna(subset=["التاريخ"])
+    df = df[df["المبلغ"] > 0].copy()
     if df.empty:
-        raise ValueError("ما فيه عمليات بتواريخ صالحة بعد القراءة.")
+        raise extractors.ExtractionError("ما لقيت مبالغ صالحة في الملف. تأكد أن فيه عمود مبلغ.")
+    # تاريخ افتراضي (الشهر الحالي) للملفات بلا تواريخ (كشوف رواتب/قوائم) — لا نرفضها.
+    if df["التاريخ"].isna().all():
+        df["التاريخ"] = pd.Timestamp.today().normalize()
+    else:
+        df["التاريخ"] = df["التاريخ"].fillna(df["التاريخ"].dropna().iloc[0])
     df["ym"] = df["التاريخ"].dt.strftime("%Y-%m")
+    df.attrs["ftype"] = ftype
     return df
 
 
@@ -103,10 +114,17 @@ def analyze(path: str, current_cash: float | None = None) -> Analysis:
         income_by_customer=income_by_customer,
         expense_by_category=expense_by_category,
     )
+    a.ftype = df.attrs.get("ftype", "statement")
     n = max(1, len(months))
     a.avg_monthly_income = total_income / n
     a.avg_monthly_expense = total_expense / n
-    # وسادة الأمان: كم يتحمّل انخفاض المبيعات قبل الوصول لنقطة التعادل (= الهامش فعلياً)
+
+    # توجيه: كشف رواتب/ميزانية له تحليل مخصّص؛ الباقي = تحليل تدفق نقدي.
+    if a.ftype == "payroll":
+        _analyze_payroll_file(a, expense_df, current_cash)
+        return a
+
+    # وسادة الأمان: كم يتحمّل انخفاض الوارد قبل نقطة التعادل (= نسبة الصافي)
     a.breakeven_drop_pct = (
         (a.avg_monthly_income - a.avg_monthly_expense) / a.avg_monthly_income
         if a.avg_monthly_income > 0 else None)
@@ -119,6 +137,43 @@ def analyze(path: str, current_cash: float | None = None) -> Analysis:
     _build_decision_and_recs(a)
     _compute_scores(a)
     return a
+
+
+def _analyze_payroll_file(a: Analysis, expense_df, monthly_income: float | None):
+    """تحليل مخصّص لكشف رواتب: إجمالي، لكل موظف، متوسط، والنسبة والقرار عند معرفة الدخل.
+    (current_cash يُعاد استخدامه كـ'الدخل الشهري' في وضع الرواتب.)"""
+    a.salary_total = a.total_expense
+    a.salary_count = int(expense_df["الطرف"].astype(str).nunique())
+    a.salary_monthly = a.salary_total                    # الملف يمثّل دفعة رواتب شهرية
+    a.avg_salary = a.salary_total / max(1, a.salary_count)
+    by_emp = expense_df.groupby("الطرف")["المبلغ"].sum().sort_values(ascending=False)
+    a.employees = [(str(n), float(v), float(v) / a.salary_total if a.salary_total else 0.0)
+                   for n, v in by_emp.items()]
+
+    findings, recs = [], []
+    # نسبة الرواتب من الدخل — فقط إذا أدخل المستخدم دخله الشهري
+    if monthly_income and monthly_income > 0:
+        a.salary_ratio = a.salary_total / monthly_income
+        sev = "high" if a.salary_ratio >= 0.55 else "medium" if a.salary_ratio >= 0.40 else "low"
+        findings.append({"key": "payroll_ratio", "severity": sev,
+                         "data": {"ratio": a.salary_ratio, "monthly": a.salary_monthly,
+                                  "count": a.salary_count, "income": monthly_income}})
+        if a.salary_ratio >= 0.40:
+            recs.append({"key": "act_review_payroll",
+                         "data": {"ratio": a.salary_ratio, "monthly": a.salary_monthly}})
+    # قرار التوظيف: أثر إضافة موظف بمتوسط الراتب
+    findings.append({"key": "hire_impact",
+                     "data": {"avg": a.avg_salary, "new_total": a.salary_total + a.avg_salary,
+                              "new_ratio": ((a.salary_total + a.avg_salary) / monthly_income)
+                              if monthly_income else None}})
+    if a.employees:
+        top_n, top_v, top_sh = a.employees[0]
+        if top_sh >= 0.40 and a.salary_count >= 2:
+            findings.append({"key": "salary_concentration",
+                             "severity": "medium",
+                             "data": {"name": top_n, "share": top_sh, "amount": top_v}})
+    a.findings = findings
+    a.recommendations = recs[:3]
 
 
 # أنماط تمييز الرواتب من التصنيف أو البيان (يشمل الأجور والمكافآت)

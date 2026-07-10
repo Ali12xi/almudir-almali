@@ -42,6 +42,12 @@ def finding_title(f, lang) -> str:
         return "وسادة أمان رقيقة" if lang == "ar" else "Thin safety cushion"
     if k == "high_payroll":
         return "عبء رواتب مرتفع" if lang == "ar" else "Heavy payroll load"
+    if k == "payroll_ratio":
+        return "نسبة الرواتب من الدخل" if lang == "ar" else "Payroll-to-income ratio"
+    if k == "hire_impact":
+        return "أثر توظيف موظف جديد" if lang == "ar" else "Impact of a new hire"
+    if k == "salary_concentration":
+        return "تركّز الرواتب في موظف" if lang == "ar" else "Salary concentration"
     return ""
 
 
@@ -82,6 +88,34 @@ def finding_text(f, lang) -> str:
                     f"لـ{d['count']} مستفيد). نسبة مرتفعة تجعل أي شهر ضعيف يضغط على نقدك مباشرة.")
         return (f"Payroll eats {pct(d['ratio'])} of your inflows (~{money(d['monthly'],'en')}/month "
                 f"for {d['count']} recipients). A high ratio means any slow month squeezes your cash immediately.")
+    if k == "payroll_ratio":
+        band = ("مرتفعة — خطر" if d['ratio'] >= 0.55 else "مرتفعة نسبياً" if d['ratio'] >= 0.40 else "ضمن المعقول")
+        if lang == "ar":
+            return (f"رواتبك {money(d['monthly'],'ar')} شهرياً لـ{d['count']} موظف = {pct(d['ratio'])} "
+                    f"من دخلك الشهري ({money(d['income'],'ar')}). النسبة {band}. "
+                    f"(المعتاد للشركات الصحية أقل من 30–40%.)")
+        band_en = ("high — risky" if d['ratio'] >= 0.55 else "somewhat high" if d['ratio'] >= 0.40 else "reasonable")
+        return (f"Payroll is {money(d['monthly'],'en')}/month for {d['count']} staff = {pct(d['ratio'])} "
+                f"of your monthly income ({money(d['income'],'en')}). That's {band_en}. "
+                f"(Healthy firms usually stay under 30–40%.)")
+    if k == "hire_impact":
+        if lang == "ar":
+            s = (f"توظيف موظف جديد بمتوسط راتبك ({money(d['avg'],'ar')}) يرفع رواتبك إلى "
+                 f"{money(d['new_total'],'ar')} شهرياً")
+            if d.get('new_ratio'):
+                s += f" — أي {pct(d['new_ratio'])} من دخلك"
+            return s + "."
+        s = (f"Hiring one more at your average salary ({money(d['avg'],'en')}) raises payroll to "
+             f"{money(d['new_total'],'en')}/month")
+        if d.get('new_ratio'):
+            s += f" — {pct(d['new_ratio'])} of income"
+        return s + "."
+    if k == "salary_concentration":
+        if lang == "ar":
+            return (f"أعلى راتب ({d['name']}) يمثّل {pct(d['share'])} من إجمالي رواتبك "
+                    f"({money(d['amount'],'ar')}). اعتماد كبير على شخص واحد.")
+        return (f"Your highest salary ({d['name']}) is {pct(d['share'])} of total payroll "
+                f"({money(d['amount'],'en')}). Heavy dependence on one person.")
     return ""
 
 
@@ -218,6 +252,15 @@ def savings_sentence(amount, lang) -> str:
     return f"Acting on the recommendations saves you about {money(amount,'en')} per year."
 
 
+def payroll_summary(a, lang) -> str:
+    """ملخص كشف الرواتب (وضع تحليل الرواتب)."""
+    if lang == "ar":
+        return (f"كشف رواتب: إجمالي {money(a.salary_total,'ar')} شهرياً لـ{a.salary_count} موظف، "
+                f"بمتوسط راتب {money(a.avg_salary,'ar')}.")
+    return (f"Payroll file: total {money(a.salary_total,'en')}/month for {a.salary_count} staff, "
+            f"average salary {money(a.avg_salary,'en')}.")
+
+
 def salary_sentence(a, lang) -> str:
     """ملخص الرواتب المستخرج من الكشف — يظهر دائماً حين توجد رواتب."""
     if lang == "ar":
@@ -342,6 +385,8 @@ def ui(lang):
         "hidden": "المخاطر المخفية", "todo_t": "ماذا تفعل الآن", "payroll_t": "قراءة الرواتب",
         "recurring_t": "الالتزامات الصامتة", "summary_t": "ملخص الوضع النقدي",
         "cashflow_note": "هذه أرقام تدفق نقدي من كشف البنك — وليست صافي ربح محاسبي.",
+        "payroll_mode": "تحليل الرواتب", "employees_t": "كشف الموظفين",
+        "payroll_income_tip": "أدخل دخلك الشهري في خانة الرصيد لتعرف نسبة الرواتب من الدخل.",
         "err_generic": "تعذّرت معالجة الملف. تأكد أنه يحتوي جدول عمليات واضح وحاول مرة أخرى.",
         "err_nofile": "اختر ملفاً أولاً.",
         "err_toobig": "الملف كبير جداً. الحد الأقصى 25 ميجابايت.",
@@ -410,6 +455,8 @@ def ui(lang):
         "hidden": "Hidden risks", "todo_t": "What to do now", "payroll_t": "Payroll read",
         "recurring_t": "Silent commitments", "summary_t": "Cash situation summary",
         "cashflow_note": "These are cash-flow figures from your bank statement — not accounting net profit.",
+        "payroll_mode": "Payroll analysis", "employees_t": "Employees",
+        "payroll_income_tip": "Enter your monthly income in the balance field to see payroll-to-income ratio.",
         "err_generic": "We couldn't process the file. Make sure it has a clear transactions table and try again.",
         "err_nofile": "Please choose a file first.",
         "err_toobig": "File is too large. Maximum size is 25 MB.",
