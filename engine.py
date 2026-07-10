@@ -7,6 +7,7 @@
 قاعدة المصداقية: الأرقام الدقيقة فقط حيث الرياضيات تسندها؛ التقديرات كنطاق متحفظ.
 """
 from __future__ import annotations
+import re
 import pandas as pd
 from dataclasses import dataclass, field
 import extractors
@@ -174,7 +175,7 @@ def _analyze_payroll_file(a: Analysis, expense_df, monthly_income: float | None)
     """تحليل مخصّص لكشف رواتب: إجمالي، لكل موظف، متوسط، والنسبة والقرار عند معرفة الدخل.
     (current_cash يُعاد استخدامه كـ'الدخل الشهري' في وضع الرواتب.)"""
     a.salary_total = a.total_expense
-    a.salary_count = int(expense_df["الطرف"].astype(str).nunique())
+    a.salary_count = _count_employees(expense_df["الطرف"])
     a.salary_monthly = a.salary_total                    # الملف يمثّل دفعة رواتب شهرية
     a.avg_salary = a.salary_total / max(1, a.salary_count)
     by_emp = expense_df.groupby("الطرف")["المبلغ"].sum().sort_values(ascending=False)
@@ -210,6 +211,17 @@ def _analyze_payroll_file(a: Analysis, expense_df, monthly_income: float | None)
 # أنماط تمييز الرواتب من التصنيف أو البيان (يشمل الأجور والمكافآت)
 _SALARY_RE = "روات|راتب|أجور|أجر|مكافأ|salary|payroll|wage"
 
+# تسميات مجمّعة/عامة ليست أسماء موظفين حقيقية — تُستبعد من عدّ الموظفين
+_GENERIC_EMP = {"مدد", "موظف", "غير محدد", "رواتب", "راتب", "ملف رواتب",
+                "payroll", "staff", "employee", "مستفيد", ""}
+
+
+def _count_employees(series) -> int:
+    """يعدّ الموظفين المميّزين، مستبعداً التسميات المجمّعة (دفعة 'مدد'/'موظف' ليست شخصاً)."""
+    names = {str(x).strip() for x in series}
+    real = {n for n in names if n and n.lower() not in _GENERIC_EMP}
+    return len(real) or len(names)
+
 
 def _analyze_payroll(a: Analysis, expense_df):
     """يستخرج الرواتب من الكشف الخام: الإجمالي، النسبة للدخل، وعدد الموظفين المقدّر."""
@@ -226,38 +238,47 @@ def _analyze_payroll(a: Analysis, expense_df):
     # النسبة من الإيراد التشغيلي الحقيقي — لا الإجمالي (رأس مال/تمويل يخفّض النسبة كذباً)
     base = a.operating_income or a.total_income
     a.salary_ratio = (a.salary_total / base) if base else 0.0
-    a.salary_count = int(sal["الطرف"].astype(str).str.strip().replace("", "غير محدد").nunique())
+    a.salary_count = _count_employees(sal["الطرف"])
+
+
+# اشتراك خدمة رقمية "صامت" حقيقي: مبلغ صغير، ثابت شهرياً بالضبط، جهة خدمة/برمجيات.
+_SUBSCRIPTION_HINT = (r"google|microsoft|zoom|adobe|canva|hosting|استضافة|slack|notion|"
+                      r"aws|azure|dropbox|figma|subscription|اشتراك|licens|رخصة|saas|"
+                      r"linkedin|mailchimp|zapier|أداة|منصة|تطبيق")
 
 
 def _detect_recurring(a: Analysis, expense_df):
-    """يكشف الالتزامات المتكررة الصامتة: طرف يتكرر عبر عدة أشهر بمبلغ ثابت تقريباً
-    (اشتراكات/خدمات يغفل عنها صاحب الشركة). يستثني الرواتب — ليست 'خفية'."""
+    """يكشف الاشتراكات الرقمية الصامتة الصغيرة التي يغفل عنها صاحب الشركة.
+    ليست: الموردين المتغيّرين، ولا الأساسيات، ولا غير التشغيلي — تلك معروفة ومقصودة.
+    الشرط: ثابت شهرياً بدقة + (جهة خدمة رقمية معروفة أو مبلغ صغير جداً ثابت)."""
     if expense_df.empty or len(a.months) < 2:
         return
     n_months = len(a.months)
     min_months = max(2, round(n_months * 0.5))
-    # نستثني الأساسيات (رواتب/إيجار/مرافق) — ليست "خفية"؛ التركيز على الاشتراكات والخدمات المنسية
-    essential = _SALARY_RE + "|إيجار|ايجار|rent|كهرباء|ماء|مياه|مرافق|water|electric|اتصالات|إنترنت|انترنت|internet"
-    ess_mask = (expense_df["التصنيف"].astype(str).str.contains(essential, regex=True, case=False)
-                | expense_df["البيان"].astype(str).str.contains(essential, regex=True, case=False))
-    # نستبعد غير التشغيلي (سداد قروض/تحويل داخلي/ضريبة) — ليست "التزامات صامتة" بل معروفة ومقصودة
-    non_op_mask = expense_df["التصنيف"].isin(extractors.NON_OPERATING)
-    ex = expense_df[~ess_mask & ~non_op_mask]
+    # نستبعد غير التشغيلي + الرسوم/الضرائب — ليست "اشتراكات تُلغى"
+    skip_cat = extractors.NON_OPERATING | {"رسوم وضرائب", "رسوم بنكية", "رسوم وخدمات بنكية"}
+    non_op_mask = expense_df["التصنيف"].isin(skip_cat)
+    ex = expense_df[~non_op_mask].copy()
+    # نجمّع بالطرف+التصنيف حتى لا نخلط اشتراك "Google Workspace" بإعلان "Google Ads"
+    ex["_key"] = ex["الطرف"].astype(str) + " · " + ex["التصنيف"].astype(str)
     recurring = []
-    for party, g in ex.groupby(ex["الطرف"].astype(str)):
+    for key, g in ex.groupby("_key"):
+        party = str(g["الطرف"].iloc[0])
         by_month = g.groupby("ym")["المبلغ"].sum()
         if len(by_month) < min_months:
             continue
         mean = float(by_month.mean())
         if mean <= 0:
             continue
-        cv = float(by_month.std(ddof=0)) / mean if mean else 1.0   # ثبات المبلغ
-        # حد أدنى ثابت بسيط: يستبعد ضجيج التقريب فقط، لا الاشتراكات الصغيرة الحقيقية
-        # (اشتراك بـ92 ريال شهرياً "خفي" وضار تراكمياً — لا نتجاهله لحجم المصاريف الكلي).
-        if cv <= 0.25 and mean >= 30.0:                             # متكرر ومستقر وذو قيمة
+        cv = float(by_month.std(ddof=0)) / mean if mean else 1.0    # ثبات المبلغ
+        blob = " ".join(g["الطرف"].astype(str)) + " " + " ".join(g["البيان"].astype(str))
+        is_service = bool(re.search(_SUBSCRIPTION_HINT, blob, re.I))
+        # اشتراك حقيقي: ثابت جداً (cv≤0.15) و(جهة خدمة رقمية معروفة أو مبلغ صغير ≤600 ريال).
+        # هذا يستبعد الموردين المتغيّرين وكبار المصروفات — ليست "اشتراكات تُلغى".
+        if cv <= 0.15 and mean >= 30.0 and (is_service or mean <= 600):
             recurring.append({"party": party, "monthly": mean,
                               "yearly": mean * 12, "months": int(len(by_month))})
-    recurring.sort(key=lambda r: r["yearly"], reverse=True)
+    recurring.sort(key=lambda r: r["monthly"], reverse=True)
     a.recurring = recurring[:10]
     a.recurring_yearly = sum(r["yearly"] for r in recurring)
 
