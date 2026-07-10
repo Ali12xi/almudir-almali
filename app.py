@@ -29,6 +29,25 @@ os.makedirs(OUTPUTS, exist_ok=True)
 ALLOWED = {".xlsx", ".xls", ".csv", ".pdf", ".docx", ".txt",
            ".png", ".jpg", ".jpeg", ".webp"}
 MAX_BYTES = 25 * 1024 * 1024
+
+# تواقيع الملفات الحقيقية (magic bytes) — نتحقق أن المحتوى يطابق الامتداد،
+# فلا يمرّ ملف خبيث مُسمّى بامتداد بريء. (النصوص csv/txt بلا توقيع موثوق.)
+_MAGIC = {
+    ".pdf":  [b"%PDF-"],
+    ".xlsx": [b"PK\x03\x04"], ".docx": [b"PK\x03\x04"],   # حاويات ZIP
+    ".xls":  [b"\xD0\xCF\x11\xE0"],                         # OLE
+    ".png":  [b"\x89PNG\r\n\x1a\n"],
+    ".jpg":  [b"\xFF\xD8\xFF"], ".jpeg": [b"\xFF\xD8\xFF"],
+    ".webp": [b"RIFF"],
+}
+
+
+def _verify_magic(head: bytes, ext: str) -> bool:
+    """يتحقق أن أول بايتات الملف تطابق نوعه المُعلَن (يمنع التمويه بالامتداد)."""
+    sigs = _MAGIC.get(ext)
+    if not sigs:                       # csv/txt: لا توقيع ثنائي — نقبل كنص
+        return True
+    return any(head.startswith(s) for s in sigs)
 UID_RE = re.compile(r"^[a-f0-9]{12}$")
 SITE_URL = os.environ.get("SITE_URL", "http://127.0.0.1:5000")
 
@@ -110,6 +129,12 @@ def analyze():
 
     ext = os.path.splitext(f.filename)[1].lower()
     if ext not in ALLOWED:
+        return render_template("index.html", t=t, site=SITE_URL, error=t["err_badformat"]), 400
+
+    # فحص التوقيع الفعلي: يمنع ملفاً خبيثاً مُموَّهاً بامتداد بريء
+    head = f.stream.read(16); f.stream.seek(0)
+    if not _verify_magic(head, ext):
+        log.warning("magic mismatch for %s (ext %s)", f.filename, ext)
         return render_template("index.html", t=t, site=SITE_URL, error=t["err_badformat"]), 400
 
     _prune(OUTPUTS); _prune(UPLOADS)          # نظافة دورية عند كل طلب
