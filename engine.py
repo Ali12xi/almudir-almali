@@ -154,8 +154,44 @@ def _detect_accrual(income_df):
     return is_accrual, invoiced, collected, cash_income_df
 
 
+# فئات التحويل التي قد تخفي راتباً موصوفاً بـ«تحويل - فلان» بدل «راتب - فلان»
+_TRANSFERISH = {"تحويلات", "تحويل", "حوالة صادرة", "مدفوعات لأفراد وجهات",
+                "مصروفات أخرى", "تحويل غير مسمّى (يحتاج توضيح)"}
+
+
+def _pool_salaries_by_person(df):
+    """راتب الشخص يبقى راتباً مهما تغيّر الوصف — «ابحث عن الشخص، مو الكلمة».
+    شهرٌ يُكتب «راتب محمد عبدالله» وشهرٌ «تحويل - محمد عبدالله» (يتغيّر موظف البنك):
+    كان النصف الثاني يذوب في «تحويلات/أخرى» فتظهر الرواتب نصف حقيقتها (فخ أبو فيصل).
+    القاعدة: من ثبت أنه يستلم راتباً (وصفٌ فيه «راتب» باسمه)، تُحسب تحويلاته الأخرى
+    المشابهة راتباً — بشرط مبلغ قريب من راتبه المعتاد (0.5×–1.5× الوسيط) لعدم ابتلاع سُلفة."""
+    exp = df["النوع"].astype(str).str.contains("دخل|إيراد|مبيع", regex=True) == False
+    sal_mask = (df["التصنيف"].astype(str).str.contains(_SALARY_RE, regex=True, case=False)
+                | df["البيان"].astype(str).str.contains(_SALARY_RE, regex=True, case=False)) & exp
+    if not sal_mask.any():
+        return df
+    for payee, g in df[sal_mask].groupby("الطرف"):
+        name = str(payee).strip()
+        if len(name) < 5 or name.lower() in _GENERIC_EMP or name in extractors.GENERIC_SOURCES:
+            continue
+        med = float(g["المبلغ"].median())
+        if med <= 0:
+            continue
+        # تحويلات لنفس الاسم (في البيان) بفئة تحويل/غامضة وبمبلغ ضمن نطاق راتبه
+        pat = r"(?<![\w؀-ۿ])" + re.escape(name) + r"(?![\w؀-ۿ])"
+        cand = (exp & ~sal_mask
+                & df["التصنيف"].astype(str).isin(_TRANSFERISH)
+                & df["البيان"].astype(str).str.contains(pat, regex=True)
+                & df["المبلغ"].between(0.5 * med, 1.5 * med))
+        if cand.any():
+            df.loc[cand, "التصنيف"] = "رواتب"
+            df.loc[cand, "الطرف"] = name
+    return df
+
+
 def analyze(path: str, current_cash: float | None = None) -> Analysis:
     df = load_ledger(path)
+    df = _pool_salaries_by_person(df)
     inc_mask = df["النوع"].astype(str).str.contains("دخل|إيراد|مبيع", regex=True)
     income_df_all = df[inc_mask]
     expense_df = df[~inc_mask]
@@ -320,6 +356,7 @@ _SALARY_RE = "روات|راتب|أجور|أجر|مكافأ|salary|payroll|wage"
 
 # تسميات مجمّعة/عامة ليست أسماء موظفين حقيقية — تُستبعد من عدّ الموظفين
 _GENERIC_EMP = {"مدد", "موظف", "غير محدد", "رواتب", "راتب", "ملف رواتب",
+                "الموظفون", "الموظفين", "موظفون", "موظفين",
                 "payroll", "staff", "employee", "مستفيد", ""}
 
 
@@ -341,7 +378,10 @@ def _analyze_payroll(a: Analysis, expense_df):
         return
     n = max(1, len(a.months))
     a.salary_total = float(sal["المبلغ"].sum())
-    a.salary_monthly = a.salary_total / n
+    # الرقم الشهري = وسيط مجاميع الشهور، لا المتوسط: شهر فيه «مكافآت نهاية العام»
+    # يرفع المتوسط فيصير «رواتبك 68,900» لصاحبٍ يعرف رقمه غيباً (64,700) — يفقد الثقة.
+    by_month = sal.groupby("ym")["المبلغ"].sum()
+    a.salary_monthly = float(by_month.median()) if len(by_month) >= 3 else a.salary_total / n
     # النسبة من حجم النشاط الحقيقي: في وضع الاستحقاق نستخدم الفواتير (حجم الشركة)،
     # لا التحصيل النقدي الصغير — وإلا تطلع نسبة مضلّلة (190%!) بسبب تأخر التحصيل.
     base = a.invoiced_total if a.is_accrual and a.invoiced_total else (a.operating_income or a.total_income)
@@ -533,6 +573,8 @@ def _compute_scores(a: Analysis):
             hit("مدفوعات متصاعدة لجهة واحدة", -10)
         elif f["key"] == "client_vanished":
             hit("عميل منتظم توقّف", -6)
+        elif f["key"] == "client_paying_partial":
+            hit("عميل رئيسي بدأ يدفع جزئياً", -12)
         elif f["key"] == "penalties":
             hit("غرامات قابلة للتفادي", -4)
         elif f["key"] == "recurring_crisis" or (f["key"] == "receivables_crisis" and not a.is_accrual):
@@ -868,6 +910,33 @@ def _detect_anomalies(a: Analysis, income_df, expense_df) -> list:
                 "sar": None, "timeframe": None,
             })
 
+    # 3ب) عميل بدأ يدفع جزئياً — أخطر إشارة مبكرة لفقدان أكبر عميل (طلب أبو فيصل):
+    #     ظهور «دفعة جزئية/partial» من مصدر منتظم في آخر شهرين، ولم تظهر منه من قبل.
+    inc_all = income_df[~income_df["التصنيف"].isin(non_op)]
+    if not inc_all.empty and len(a.months) >= 4:
+        last2 = {m["ym"] for m in a.months[-2:]}
+        part_mask = inc_all["البيان"].astype(str).str.contains(
+            r"جزئي|دفعة\s*جزئية|partial", regex=True, case=False, na=False)
+        for party, g in inc_all[part_mask].groupby("الطرف"):
+            p = str(party)
+            if p in extractors.GENERIC_SOURCES:
+                continue
+            recent_partials = g[g["ym"].isin(last2)]
+            old_partials = g[~g["ym"].isin(last2)]
+            hist = inc_all[(inc_all["الطرف"] == p) & ~part_mask]
+            if recent_partials.empty or not old_partials.empty or hist.empty:
+                continue                       # نمط جديد في آخر شهرين فقط — وإلا فليس تحوّلاً
+            hist_monthly = float(hist["المبلغ"].sum()) / max(1, hist["ym"].nunique())
+            partial_total = float(recent_partials["المبلغ"].sum())
+            if hist_monthly >= 10000:
+                out.append({
+                    "key": "client_paying_partial", "severity": "high",
+                    "data": {"party": p, "partial_total": partial_total,
+                             "n_partials": int(len(recent_partials)),
+                             "usual_monthly": hist_monthly},
+                    "sar": None, "timeframe": None,
+                })
+
     # 3) عميل توقّف: مصدر دخل تشغيلي منتظم (≥4 أشهر) اختفى في آخر شهرين من الفترة
     inc = income_df[~income_df["التصنيف"].isin(non_op)]
     if not inc.empty and len(a.months) >= 6:
@@ -954,8 +1023,10 @@ def _build_decision_and_recs(a: Analysis):
             # (نحسبها من الإيراد التشغيلي — الإجمالي الخام المنتفخ بالتمويل يعطي «أضف 0»)
             base_income = a.operating_income or a.total_income
             need_monthly = max(0.0, (2 * top_amt - base_income)) / n
+            # «أضف ~0 ريال» باگ ظاهر — لو الهدف صفر/سالب نصيغ الفعل بلا رقم مكسور
             recs.append({"key": "act_diversify",
-                         "data": {"share": f["data"]["share"], "monthly_new": need_monthly}})
+                         "data": {"share": f["data"]["share"],
+                                  "monthly_new": need_monthly if need_monthly >= 100 else None}})
         elif f["key"] == "expense_spike":
             recs.append({"key": "act_trim",
                          "data": {"category": f["data"]["category"],

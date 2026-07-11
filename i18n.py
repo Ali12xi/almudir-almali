@@ -90,6 +90,8 @@ def finding_title(f, lang) -> str:
         return "تعمل بلا وسادة نقدية" if lang == "ar" else "Operating with no cash cushion"
     if k == "recurring_payees":
         return "مدفوعات متكررة لأفراد وجهات — حدّدها" if lang == "ar" else "Recurring payments to people — clarify them"
+    if k == "client_paying_partial":
+        return "عميلك الأكبر بدأ يدفع جزئياً" if lang == "ar" else "Your top client started paying partially"
     return ""
 
 
@@ -245,6 +247,16 @@ def finding_text(f, lang) -> str:
         return (f"«{d['party']}» paid you regularly (~{money(d['monthly'],'en')}/month for "
                 f"{d['months_active']} months) then stopped completely since {d['last_seen']}. "
                 f"Lost a client? Reach out before that income goes to a competitor.")
+    if k == "client_paying_partial":
+        if lang == "ar":
+            return (f"«{d['party']}» كان يدفع لك ~{money(d['usual_monthly'],'ar')} شهرياً، "
+                    f"وفي آخر شهرين ظهرت منه {d['n_partials']} دفعات جزئية بإجمالي "
+                    f"{money(d['partial_total'],'ar')} — عميلك الأكبر بدأ يماطل. "
+                    f"تواصل معه اليوم واطلب جدولة المستحقات قبل أن يكبر المتأخر.")
+        return (f"«{d['party']}» used to pay you ~{money(d['usual_monthly'],'en')}/month; "
+                f"in the last two months, {d['n_partials']} partial payments appeared totaling "
+                f"{money(d['partial_total'],'en')} — your top client is starting to stall. "
+                f"Contact them today and schedule the outstanding amounts before they grow.")
     if k == "penalties":
         if lang == "ar":
             return (f"دفعت {money(d['total'],'ar')} غرامات ومخالفات ({d['count']} حركة: تأخير سداد/مخالفات). "
@@ -344,12 +356,18 @@ def rec_text(item, lang) -> str:
                 f"bleed — start with your largest non-essential line this week.")
     if k == "act_diversify":
         if lang == "ar":
-            return (f"اعتمادك على مصدر وارد واحد ({pct(d['share'])}) خطر. استهدف إضافة "
-                    f"~{money(d['monthly_new'],'ar')} شهرياً من مصادر وارد جديدة خلال 90 يوماً "
-                    f"لتنزيل الحصة تحت 50%.")
-        return (f"Depending on one inflow source ({pct(d['share'])}) is risky. Aim to add "
-                f"~{money(d['monthly_new'],'en')} per month from new inflow sources within 90 days "
-                f"to bring the share under 50%.")
+            if d.get("monthly_new"):
+                return (f"اعتمادك على مصدر وارد واحد ({pct(d['share'])}) خطر. استهدف إضافة "
+                        f"~{money(d['monthly_new'],'ar')} شهرياً من مصادر وارد جديدة خلال 90 يوماً "
+                        f"لتنزيل الحصة تحت 50%.")
+            return (f"اعتمادك على مصدر وارد واحد ({pct(d['share'])}) خطر. ابدأ خلال 90 يوماً "
+                    f"بإضافة عميلين جديدين على الأقل حتى لا يتوقف دخلك بتوقف جهة واحدة.")
+        if d.get("monthly_new"):
+            return (f"Depending on one inflow source ({pct(d['share'])}) is risky. Aim to add "
+                    f"~{money(d['monthly_new'],'en')} per month from new inflow sources within 90 days "
+                    f"to bring the share under 50%.")
+        return (f"Depending on one inflow source ({pct(d['share'])}) is risky. Within 90 days, "
+                f"add at least two new clients so one party stopping doesn't stop your income.")
     if k == "act_trim":
         if lang == "ar":
             return (f"أرجِع مصروف «{d['category']}» إلى مستواه الطبيعي (~{money(d['target'],'ar')} شهرياً) "
