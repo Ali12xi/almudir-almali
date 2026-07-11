@@ -50,6 +50,17 @@
 
     {% else %}
 
+    {% if vm.shock %}
+    <div class="shock">{{ vm.shock }}</div>
+    {% endif %}
+
+    {% if vm.data_quality %}
+    <div class="dqbox">
+      <h3>⚠️ {{ t.dq_t }}</h3>
+      {% for n in vm.data_quality %}<p>{{ n }}</p>{% endfor %}
+    </div>
+    {% endif %}
+
     {% if vm.decision_head %}
     <div class="decision">
       <div class="kicker">{{ t.decision }}</div>
@@ -137,6 +148,20 @@
     <div class="risks">
       <h3>{{ t.hidden }}</h3>
       {% for r in vm.risks %}<div class="r"><span class="pri">{{ r.badge }}</span> <strong>{{ r.title }}:</strong> {{ r.text }}</div>{% endfor %}
+    </div>
+    {% endif %}
+
+    {% if vm.best_news %}
+    <div class="bestbox">
+      <h3>✅ {{ t.best_t }}</h3>
+      <p>{{ vm.best_news }}</p>
+    </div>
+    {% endif %}
+
+    {% if vm.clarify %}
+    <div class="clarifybox">
+      <h3>❓ {{ t.clarify_t }}</h3>
+      {% for c in vm.clarify %}<p>{{ c }}</p>{% endfor %}
     </div>
     {% endif %}
 

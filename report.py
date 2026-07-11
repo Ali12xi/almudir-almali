@@ -147,6 +147,13 @@ class Report:
                        11, "Body", MUTE)
         self.y = PAGE_H - 62 * mm
 
+        # الجملة الصادمة — أول ما يُقرأ، بأكبر خط (تُشتق من أعلى خطر لا من قالب)
+        shock = i18n.shock_sentence(a, self.lang)
+        if shock:
+            for line in self.wrap(shock, "Bold", 17, COLW):
+                self.lead_text(line, 17, "Bold", RED); self.y -= 25
+            self.y -= 8
+
         if a.decision:
             box_h = 60 * mm
             c.setFillColor(LIGHT); c.roundRect(LEFT, self.y - box_h, COLW, box_h, 10, fill=1, stroke=0)
@@ -281,6 +288,34 @@ class Report:
             self.bar(cat, amt, amt / total, col)
         self.hline()
 
+    def data_quality(self, a):
+        """ملاحظات جودة البيانات — قبل كل شيء: أرقام فوق بيانات مشكوك فيها تضليل."""
+        if not a.data_quality:
+            return
+        self.section_title(self.R.get("dq", "ملاحظات على جودة البيانات"), AMBER)
+        for item in a.data_quality:
+            self.para("⚠ " + i18n.dq_text(item, self.lang), size=10.5, color=AMBER, gap=3)
+        self.hline()
+
+    def best_news(self, a):
+        """أفضل خبر — توازن نفسي إلزامي: خطر بلا أمل = قلق؛ صورة كاملة = ثقة."""
+        line = i18n.best_news(a, self.lang)
+        if not line:
+            return
+        self.section_title(self.R.get("best", "أفضل خبر"), GREEN)
+        self.para(line, size=11, color=GREEN, gap=4)
+        self.hline()
+
+    def clarify(self, a):
+        """يحتاج توضيحك — المجهول يُعرض ويُسأل عنه، لا يُخمَّن (اعترف لا تخمّن)."""
+        items = [f for f in a.findings if f["key"] in ("unknown_inflows", "recurring_payees")]
+        if not items:
+            return
+        self.section_title(self.R.get("clarify", "يحتاج توضيحك"), NAVY)
+        for f in items:
+            self.para("؟ " + i18n.finding_text(f, self.lang), size=10.5, color=NAVY, gap=3)
+        self.hline()
+
     def chain(self, a):
         """سلسلة السبب والنتيجة — السرد الذي يربط الأحداث (محرك العلاقات المالية)."""
         lines = i18n.risk_chain_sentences(a, self.lang)
@@ -296,7 +331,8 @@ class Report:
             return
         self.section_title(self.R["risks"], AMBER)
         _col = {"high": RED, "medium": AMBER, "low": GREEN}
-        for f in a.findings:
+        skip = {"unknown_inflows", "recurring_payees"}        # لها قسم «يحتاج توضيحك»
+        for f in [x for x in a.findings if x["key"] not in skip]:
             self.need(30)
             sev = f.get("severity", "medium")
             col = _col.get(sev, AMBER)
@@ -349,9 +385,12 @@ class Report:
             self.payroll_cover(a); self.payroll_employees(a)
             self.risks(a); self.todo(a); self.footer()
         else:
-            self.cover(a); self.overview(a); self.chain(a); self.earn_bleed(a)
+            # الترتيب الإلزامي: صادمة (الغلاف) ← مؤشر+تفكيك ← جودة البيانات ← السلسلة
+            # ← المخاطر مرتّبة ← أفضل خبر ← دخل/صادر ← يحتاج توضيحك ← الأفعال
+            self.cover(a); self.overview(a); self.data_quality(a); self.chain(a)
+            self.risks(a); self.best_news(a); self.earn_bleed(a)
             self.payroll_recurring(a); self.non_operating(a)
-            self.risks(a); self.todo(a); self.footer()
+            self.clarify(a); self.todo(a); self.footer()
         self.c.save()
 
 

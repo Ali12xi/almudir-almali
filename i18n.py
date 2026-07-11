@@ -86,6 +86,10 @@ def finding_title(f, lang) -> str:
         return "عميل منتظم توقّف" if lang == "ar" else "A regular client went quiet"
     if k == "penalties":
         return "غرامات ومخالفات قابلة للتفادي" if lang == "ar" else "Avoidable fines & penalties"
+    if k == "cash_buffer_risk":
+        return "تعمل بلا وسادة نقدية" if lang == "ar" else "Operating with no cash cushion"
+    if k == "recurring_payees":
+        return "مدفوعات متكررة لأفراد وجهات — حدّدها" if lang == "ar" else "Recurring payments to people — clarify them"
     return ""
 
 
@@ -247,6 +251,32 @@ def finding_text(f, lang) -> str:
                     f"هذا مبلغ قابل للتفادي بالكامل — جدولة السداد قبل الاستحقاق توقفه من المصدر.")
         return (f"You paid {money(d['total'],'en')} in fines and penalties ({d['count']} items: late payments/violations). "
                 f"This is fully avoidable — scheduling payments before due dates stops it at the source.")
+    if k == "cash_buffer_risk":
+        if lang == "ar":
+            s = f"رصيدك لامس {d['min']:,.2f} ريال"
+            if d.get("pct_5k") is not None:
+                s += f"، وبقي تحت 5,000 ريال في {pct(d['pct_5k'])} من حركاتك"
+            s += ". شركتك تعمل بلا وسادة نقدية — أي تأخر تحصيل ليوم واحد يعني ارتداد مدفوعات"
+            if d.get("cover") is not None:
+                s += f". وسيط رصيدك ({money(d['median'],'ar')}) يغطي ~{d['cover']:.0f} يوم من الصادر فقط"
+            return s + "."
+        s = f"Your balance touched SAR {d['min']:,.2f}"
+        if d.get("pct_5k") is not None:
+            s += f", and stayed below SAR 5,000 in {pct(d['pct_5k'])} of your transactions"
+        s += ". You operate with no cash cushion — a single day's collection delay means bounced payments"
+        if d.get("cover") is not None:
+            s += f". Your median balance ({money(d['median'],'en')}) covers only ~{d['cover']:.0f} days of outflows"
+        return s + "."
+    if k == "recurring_payees":
+        top = "، ".join(f"{n} ({c} دفعة)" for n, c in d.get("top", []))
+        if lang == "ar":
+            return (f"{money(d['total'],'ar')} ({pct(d['share'])} من مصروفاتك) تخرج بانتظام "
+                    f"لـ{d['n']} جهة. أكبرها: {top}. "
+                    f"هل هذه رواتب عمالة، أم موردون، أم شيء آخر؟ حدّدها لنحسبها بدقة.")
+        top_en = ", ".join(f"{n} ({c} payments)" for n, c in d.get("top", []))
+        return (f"{money(d['total'],'en')} ({pct(d['share'])} of your expenses) goes out regularly "
+                f"to {d['n']} payees. Largest: {top_en}. "
+                f"Are these labour wages, suppliers, or something else? Classify them so we compute precisely.")
     return ""
 
 
@@ -351,6 +381,91 @@ def rec_text(item, lang) -> str:
         return (f"You have recurring auto-charges of ~{money(d['yearly'],'en')} per year "
                 f"({d['count']} vendors). Review them and cancel what you don't truly use — instant silent savings.")
     return finding_text(item, lang)
+
+
+# ---------- ملاحظات جودة البيانات (فحوصات السلامة) ----------
+def dq_text(item, lang) -> str:
+    k, d = item["key"], item["data"]
+    if k == "utility_daily":
+        if lang == "ar":
+            return (f"غير منطقي: {d['n']} فاتورة لـ«{d['vendor']}» في شهر واحد ({d['ym']}) "
+                    f"بإجمالي {money(d['total'],'ar')} — فاتورة المرفق تتكرر شهرياً لا يومياً. تحقق من بياناتك.")
+        return (f"Implausible: {d['n']} bills to «{d['vendor']}» in one month ({d['ym']}) "
+                f"totaling {money(d['total'],'en')} — utility bills recur monthly, not daily. Check your data.")
+    if k == "category_dominant":
+        if lang == "ar":
+            return (f"بند «{d['cat']}» يمثل {pct(d['pct'])} من دخلك ({money(d['amount'],'ar')}) — "
+                    f"نسبة كبيرة جداً لبند واحد؛ تأكد أن البيانات صحيحة ومقصودة.")
+        return (f"«{d['cat']}» equals {pct(d['pct'])} of your income ({money(d['amount'],'en')}) — "
+                f"unusually large for one line; confirm the data is correct and intended.")
+    if k == "gap_pattern":
+        if lang == "ar":
+            return (f"«{d['cat']}» يظهر في {d['m']} أشهر فقط من {d['total']} — "
+                    f"بيانات ناقصة أم نمط موسمي؟ وضّح حتى لا تنحرف الاتجاهات.")
+        return (f"«{d['cat']}» appears in only {d['m']} of {d['total']} months — "
+                f"missing data or seasonal? Clarify so trends don't skew.")
+    return ""
+
+
+# ---------- الجملة الصادمة (أول سطر في التقرير — تُشتق من أعلى خطر، لا من قالب) ----------
+def shock_sentence(a, lang) -> str | None:
+    keys = {f["key"]: f for f in a.findings}
+    if "overdraft" in keys:
+        d = keys["overdraft"]["data"]
+        return (f"حسابك دخل السالب: الرصيد الختامي سالب {money(d['closing'],'ar')}. التمويل كان يستر النزيف."
+                if lang == "ar" else
+                f"Your account went negative: closing balance minus {money(d['closing'],'en')}. Financing was masking the bleed.")
+    if "cash_buffer_risk" in keys:
+        d = keys["cash_buffer_risk"]["data"]
+        if lang == "ar":
+            return f"رصيدك لامس {d['min']:,.2f} ريال. تعمل بلا وسادة نقدية."
+        return f"Your balance touched SAR {d['min']:,.2f}. You operate with no cash cushion."
+    if "receivables_crisis" in keys:
+        d = keys["receivables_crisis"]["data"]
+        return (f"{money(d['receivables'],'ar')} من مبيعاتك عالقة عند عملائك — حصّلت {pct(d['rate'])} فقط."
+                if lang == "ar" else
+                f"{money(d['receivables'],'en')} of your sales is stuck with clients — only {pct(d['rate'])} collected.")
+    if "operating_bleed" in keys:
+        d = keys["operating_bleed"]["data"]
+        return (f"نشاطك خسر نقداً في {d['neg']} من {d['total']} شهراً."
+                if lang == "ar" else
+                f"Your operations lost cash in {d['neg']} of {d['total']} months.")
+    if "customer_concentration" in keys:
+        d = keys["customer_concentration"]["data"]
+        return (f"{pct(d['share'])} من وارِدك معلّق على جهة واحدة: {d['name']}."
+                if lang == "ar" else
+                f"{pct(d['share'])} of your inflows ride on one source: {d['name']}.")
+    return None
+
+
+# ---------- أفضل خبر (توازن نفسي — إلزامي حين يوجد خبر صادق) ----------
+def best_news(a, lang) -> str | None:
+    # مبيعات نقدية موزّعة عبر فروع = قاعدة دخل لا تعتمد على عميل
+    if a.cash_sales_share >= 0.35 and a.cash_branches >= 2:
+        return (f"{pct(a.cash_sales_share)} من دخلك مبيعات نقدية عبر {a.cash_branches} فروع — "
+                f"قاعدة دخل موزّعة لا تعتمد على عميل واحد."
+                if lang == "ar" else
+                f"{pct(a.cash_sales_share)} of your income is cash sales across {a.cash_branches} branches — "
+                f"a distributed income base with no single-client dependency.")
+    # تنويع مصادر حقيقي
+    real = [s for s in a.income_by_customer if s[2] >= 0.30]
+    if a.income_by_customer and not real and a.operating_income > 0:
+        return ("لا تعتمد على عميل واحد — أكبر مصدر وارد أقل من 30% من دخلك."
+                if lang == "ar" else
+                "No single-client dependency — your largest source is under 30% of income.")
+    if a.buffer_months is not None and a.buffer_months >= 3:
+        return (f"وسادتك النقدية تغطي ~{a.buffer_months:.1f} شهراً من مصاريفك حتى لو توقف الدخل."
+                if lang == "ar" else
+                f"Your cash cushion covers ~{a.buffer_months:.1f} months of expenses even if income stopped.")
+    if a.net_profit > 0 and a.avg_margin >= 0.10:
+        return (f"تدفقك النقدي موجب: يبقى في حسابك {pct(a.avg_margin)} من كل ريال يدخل."
+                if lang == "ar" else
+                f"Your cash flow is positive: {pct(a.avg_margin)} of every riyal in stays in your account.")
+    if 0 < a.salary_ratio < 0.30:
+        return (f"رواتبك تحت السيطرة: {pct(a.salary_ratio)} فقط من وارِدك."
+                if lang == "ar" else
+                f"Payroll is under control: only {pct(a.salary_ratio)} of your inflows.")
+    return None
 
 
 # ---------- سلسلة السبب والنتيجة (محرك العلاقات المالية) ----------
@@ -555,6 +670,7 @@ REPORT = {
         "emp": "موظف", "per_month": "شهرياً", "per_year": "سنوياً", "of_income": "من الوارد",
         "risks": "المخاطر المخفية", "todo": "ماذا تفعل الآن",
         "chain": "سلسلة السبب والنتيجة", "priority": "الأولوية", "score_why": "لماذا هذا المؤشر؟",
+        "dq": "ملاحظات على جودة البيانات", "best": "أفضل خبر", "clarify": "يحتاج توضيحك",
         "footer": "تحليل تدفق نقدي مبني على كشف حسابك البنكي — يكشف حركة نقدك ومخاطرها، وليس صافي "
                   "الربح المحاسبي (الذي يحتاج فواتيرك ومصاريفك المستحقة). أداة استرشادية لا تغني عن "
                   "مراجعة محاسب مختص. — المدير المالي",
@@ -574,6 +690,7 @@ REPORT = {
         "emp": "staff", "per_month": "per month", "per_year": "per year", "of_income": "of inflows",
         "risks": "Hidden risks", "todo": "What to do now",
         "chain": "Cause & effect", "priority": "Priority", "score_why": "Why this score?",
+        "dq": "Data quality notes", "best": "Best news", "clarify": "Needs your clarification",
         "footer": "A cash-flow analysis based on your bank statement — it surfaces how your cash moves "
                   "and its risks, not accounting net profit (which needs your invoices and accruals). "
                   "A guidance tool, not a substitute for a qualified accountant. — The Financial Director",
@@ -644,6 +761,8 @@ def ui(lang):
         "safety": "مؤشر الأمان النقدي", "survival": "أيام بقاء السيولة", "savings": "توفير ممكن سنوياً",
         "healthy": "تدفق نقدي موجب", "caution": "مستقر — مع تحفّظات", "risk": "التدفق يحتاج تدخّلاً",
         "hidden": "المخاطر المخفية", "chain_t": "سلسلة السبب والنتيجة", "todo_t": "ماذا تفعل الآن", "payroll_t": "قراءة الرواتب",
+        "dq_t": "ملاحظات على جودة البيانات — راجعها قبل الاعتماد على الأرقام",
+        "best_t": "أفضل خبر", "clarify_t": "يحتاج توضيحك",
         "recurring_t": "الالتزامات الصامتة", "summary_t": "ملخص الوضع النقدي",
         "cashflow_note": "هذه أرقام تدفق نقدي من كشف البنك — وليست صافي ربح محاسبي.",
         "payroll_mode": "تحليل الرواتب", "employees_t": "كشف الموظفين",
@@ -715,6 +834,8 @@ def ui(lang):
         "safety": "Cash safety score", "survival": "Cash survival days", "savings": "Possible yearly savings",
         "healthy": "Positive cash flow", "caution": "Stable — with caveats", "risk": "Cash flow needs action",
         "hidden": "Hidden risks", "chain_t": "Cause & effect", "todo_t": "What to do now", "payroll_t": "Payroll read",
+        "dq_t": "Data quality notes — review before relying on the numbers",
+        "best_t": "Best news", "clarify_t": "Needs your clarification",
         "recurring_t": "Silent commitments", "summary_t": "Cash situation summary",
         "cashflow_note": "These are cash-flow figures from your bank statement — not accounting net profit.",
         "payroll_mode": "Payroll analysis", "employees_t": "Employees",

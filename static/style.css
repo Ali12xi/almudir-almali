@@ -156,6 +156,25 @@ footer .fcopy{font-size:13px;margin-top:14px;color:#7f97ad}
 .risks .r{border-top:1px solid var(--line);padding:12px 0;font-size:14.5px;color:var(--ink);line-height:1.7}
 .risks .r:first-of-type{border-top:none}
 .pri{font-weight:700;font-size:13px;white-space:nowrap;margin-inline-end:5px}
+/* الجملة الصادمة — أول ما يراه المستخدم، بأكبر خط في التقرير */
+.shock{background:#fff;border:1px solid var(--line);border-inline-start:6px solid var(--red);
+  border-radius:var(--radius);padding:22px 24px;margin-bottom:16px;box-shadow:var(--shadow-sm);
+  font-size:24px;font-weight:800;line-height:1.5;color:var(--navy)}
+/* ملاحظات جودة البيانات — العميل الحقيقي يرفع ملفات معيبة؛ الصدق ميزة بيعية */
+.dqbox{background:var(--amber-l);border:1px solid #f0dfc0;border-radius:var(--radius);
+  padding:18px 22px;margin-bottom:16px}
+.dqbox h3{font-size:15px;color:#7a5a12;margin-bottom:8px}
+.dqbox p{color:#7a5a12;font-size:14px;line-height:1.7;margin:4px 0}
+/* أفضل خبر — توازن نفسي (خطر بلا أمل = قلق؛ صورة كاملة = ثقة) */
+.bestbox{background:var(--green-l);border:1px solid #cbe8dc;border-radius:var(--radius);
+  padding:18px 22px;margin-top:16px}
+.bestbox h3{font-size:15px;color:#12513c;margin-bottom:6px}
+.bestbox p{color:#12513c;font-size:14.5px;line-height:1.7}
+/* يحتاج توضيحك — المجهول يُسأل عنه ولا يُخمَّن (اعترف لا تخمّن) */
+.clarifybox{background:#f4f0fb;border:1px solid #ded3f2;border-radius:var(--radius);
+  padding:18px 22px;margin-top:16px}
+.clarifybox h3{font-size:15px;color:#4a3577;margin-bottom:8px}
+.clarifybox p{color:#4a3577;font-size:14px;line-height:1.75;margin:6px 0}
 /* سلسلة السبب والنتيجة — محرك العلاقات المالية (السرد الذي يربط الأحداث) */
 .chain{background:linear-gradient(180deg,#fbfdff,#f2f7fc);border:1px solid var(--line);
   border-inline-start:6px solid var(--navy);border-radius:var(--radius);padding:22px 24px;

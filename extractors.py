@@ -83,6 +83,76 @@ _TX_BLOCK = re.compile(
     r"([\d,]+\.\d{2})\s*SAR\s+([\d,]+\.\d{2})\s*SAR\s+([\d,]+\.\d{2})\s*SAR"
     r"([^\n]*)\n(.*?)(\d{4}/\d{2}/\d{2})", re.DOTALL)
 
+# قاموس تسميات العمليات العربية (الراجحي) — كل حركة في الكشف تحمل تسميتها العربية
+# صراحةً، وهذه أدق مصدر تصنيف (ترفع التغطية من ~32% إلى ~99% بلا ذكاء اصطناعي — PDPL).
+# ⚠️ الترتيب حرج: الأخص أولاً، و«تحويل» نمط عام يبتلع غيره فيبقى الأخير حصراً.
+# direction: in/out/both — قاعدة out لا تُطبَّق على صف دائن (يمنع «رسوم» تظهر دخلاً).
+_RAJHI_LABELS = [
+    (r"إ?سترداد\s*مدفوعات\s*سداد", "استرداد مدفوعات حكومية", "in"),
+    (r"خدمات\s*المقيمين", "رسوم حكومية — خدمات المقيمين", "out"),
+    (r"المخالفات\s*المرورية", "مخالفات مرورية", "out"),
+    (r"فواتير\s*نظام\s*سداد", "فواتير سداد", "out"),
+    (r"رسوم\s*حوالة", "رسوم حوالات", "out"),
+    (r"رسوم\s*عمليات?\s*سحب|رسوم\s*سحب", "رسوم بنكية", "out"),
+    (r"حوالات?\s*فورية\s*واردة", "حوالات واردة", "in"),
+    (r"حوالة\s*فورية\s*صادرة", "حوالة صادرة", "out"),
+    (r"الصراف\s*ال[اآ]لي-?\s*إيداع", "مبيعات نقدية (إيداع صراف)", "in"),
+    (r"الصراف\s*ال[اآ]لي-?\s*سحب", "سحب نقدي من الصراف", "out"),
+    (r"شراء\s*انترنت.*دولي|دولي.*شراء\s*انترنت", "شراء إنترنت دولي", "out"),
+    (r"شراء\s*انترنت", "شراء إنترنت محلي", "out"),
+    (r"نقاط\s*البيع", "مشتريات نقاط بيع", "out"),
+    (r"التحويل\s*للحساب\s*الصراف|الصراف.*التحويل\s*من\s*الحساب",
+     "تحويل حساب الصراف (داخلي)", "both"),
+    (r"عملية\s*تحويل\s*داخلية", "تحويل داخلي وارد (عميل لعميل)", "both"),
+    (r"تحويل", "تحويل", "both"),                     # ← يجب أن يبقى الأخير
+]
+
+# اسم المستفيد العربي من وصف التحويل («سداد-بثينه» → بثينه، «/مصطفى علي موسى ادم»)
+_PAYEE_NAME_RE = re.compile(r"[-/]\s*([؀-ۿ][؀-ۿ\s]{2,30})")
+# كلمات ليست أسماء أشخاص/جهات (تظهر بعد - أو / في الأوصاف)
+_NOT_A_NAME = {"سداد", "فرع", "الوقت", "ملاحظة", "من حساب", "الى حساب", "تحويل", "مدفوعات",
+               "مؤسسة", "شركة", "مصرف", "بنك", "حوالة", "رسوم"}
+# فرع الإيداع من الوصف اللاتيني (لعدّ فروع المبيعات النقدية)
+_BRANCH_RE = re.compile(r"CA-([A-Z .\-']+?)\s*(?:BRANCH|REMIT)", re.I)
+
+
+def _payee_from_desc(desc: str) -> str | None:
+    """يستخرج اسم المستفيد/المرسل العربي من وصف الحوالة — أول اسم حقيقي بعد - أو /."""
+    for m in _PAYEE_NAME_RE.finditer(str(desc)):
+        name = re.sub(r"\s+", " ", m.group(1)).strip()
+        if len(name) >= 3 and name not in _NOT_A_NAME:
+            return name[:40]
+    return None
+
+
+def _classify_rajhi(label: str, desc: str, is_income: bool):
+    """تصنيف من التسمية العربية أولاً (أدق مصدر)، ويرفض القاعدة المخالفة للاتجاه.
+    يُرجع (التصنيف، الطرف) أو (None, None) إن لم تطابق أي تسمية."""
+    blob = f"{label} {desc}"
+    for pat, cat, direction in _RAJHI_LABELS:
+        where = label if re.search(pat, label) else (blob if re.search(pat, blob) else None)
+        if where is None:
+            continue
+        if direction == "in" and not is_income:
+            continue
+        if direction == "out" and is_income:
+            continue
+        # الطرف حسب الفئة
+        if cat == "مبيعات نقدية (إيداع صراف)":
+            return cat, cat
+        if cat in ("حوالات واردة", "حوالة صادرة", "تحويل", "تحويل داخلي وارد (عميل لعميل)"):
+            name = _payee_from_desc(desc)
+            if name:
+                # صادر مسمّى = مدفوعات لأفراد وجهات (يغذّي كاشف المدفوعات المتكررة)
+                if not is_income and cat in ("حوالة صادرة", "تحويل"):
+                    return "مدفوعات لأفراد وجهات", name
+                return cat, name
+            if not is_income and cat in ("حوالة صادرة", "تحويل"):
+                return "تحويل غير مسمّى (يحتاج توضيح)", "تحويل غير مسمّى (يحتاج توضيح)"
+            return cat, cat
+        return cat, cat
+    return None, None
+
 # قاموس مصطلحات البنوك السعودية → (تصنيف عربي نظيف، طرف نظيف، هل هو "مصدر عام" لا عميل؟)
 # محلي بالكامل (بلا ذكاء اصطناعي خارجي) — حمايةً لخصوصية بيانات العميل (PDPL).
 # الترتيب من الأخص للأعم. "المصدر العام" = إيداع نقدي/تحويل/رسوم — ليس عميلاً يُخشى فقدانه.
@@ -108,6 +178,13 @@ GENERIC_SOURCES = {"إيداعات نقدية", "تحويلات بنكية", "ر
                    "مشتريات ونقاط بيع", "سداد فواتير وخدمات", "محطات وقود", "إيجار",
                    "دخل غير مصنّف", "غير محدد", "سحوبات نقدية", "مصروفات أخرى",
                    "رواتب", "تسويق وإعلان", "وقود ومحروقات",
+                   # تسميات الراجحي العامة — ليست «عملاء» يُخشى فقدانهم
+                   "مبيعات نقدية (إيداع صراف)", "حوالات واردة", "استرداد مدفوعات حكومية",
+                   "فواتير سداد", "رسوم حكومية — خدمات المقيمين", "مخالفات مرورية",
+                   "سحب نقدي من الصراف", "شراء إنترنت محلي", "شراء إنترنت دولي",
+                   "مشتريات نقاط بيع", "تحويل حساب الصراف (داخلي)", "رسوم حوالات",
+                   "تحويل غير مسمّى (يحتاج توضيح)", "تحويل داخلي وارد (عميل لعميل)",
+                   "تحويل", "حوالة صادرة",
                    "عملاء متنوعون", "عملاء", "عميل", "متنوعون", "customers", "various"}
 
 # ---------- طبقة "تشغيلي مقابل غير تشغيلي" (فخ الربح الجوهري) ----------
@@ -250,21 +327,30 @@ def _read_structured_pdf(path: str) -> pd.DataFrame:
         raise ExtractionError("PyMuPDF غير مثبّت")
     import unicodedata
     rows = []
+    balances = []          # الرصيد الجاري لكل حركة (بترتيب الكشف) — وقود كاشف وسادة الرصيد
+    branches = set()       # فروع الإيداع النقدي (لقراءة «مبيعات نقدية عبر N فروع»)
     doc = fitz.open(path)
     try:
         for pg in doc:
             # تطبيع NFKC: يحوّل أشكال العرض العربية (ﺷﺮﺍﺀ) إلى عربي عادي (شراء)
-            # حتى تطابق قواعد التصنيف العربية. (بعض بنوك تخزّن النص مُشكّلاً مسبقاً.)
-            text = unicodedata.normalize("NFKC", pg.get_text())
+            # + إزالة التطويل (ـ): «سـداد» في الكشف الحقيقي لا تطابق «سداد» بدونها.
+            text = unicodedata.normalize("NFKC", pg.get_text()).replace("ـ", "")
             for m in _TX_BLOCK.finditer(text):
-                _bal, cr, db, tail, desc, date = m.groups()
+                bal, cr, db, tail, desc, date = m.groups()
                 cr = float(cr.replace(",", "")); db = float(db.replace(",", ""))
                 if cr <= 0 and db <= 0:
                     continue
                 is_income = cr > 0
                 label = (tail or "").strip()
                 blob = f"{label} {desc or ''}"
-                cat, party = _classify(blob, desc, is_income)
+                # التسمية العربية أولاً (أدق مصدر — موجودة في كل حركة)، ثم القواعد العامة
+                cat, party = _classify_rajhi(label, desc or "", is_income)
+                if cat is None:
+                    cat, party = _classify(blob, desc, is_income)
+                if cat == "مبيعات نقدية (إيداع صراف)":
+                    bm = _BRANCH_RE.search(desc or "")
+                    if bm:
+                        branches.add(bm.group(1).strip())
                 rows.append({
                     "التاريخ": date.replace("/", "-"),
                     "البيان": re.sub(r"\s+", " ", blob).strip()[:120],
@@ -273,12 +359,18 @@ def _read_structured_pdf(path: str) -> pd.DataFrame:
                     "الطرف": party,
                     "المبلغ": cr if is_income else db,
                 })
+                balances.append(float(bal.replace(",", "")))
     finally:
         doc.close()
     if len(rows) < 3:
         raise ExtractionError("لم يُتعرّف على تنسيق كشف منظّم في هذا الـPDF.")
     out = pd.DataFrame(rows)[STD_COLS]
     out.attrs["ftype"] = "statement"
+    out.attrs["balances"] = balances
+    out.attrs["cash_branches"] = len(branches)
+    if balances:
+        out.attrs["closing_balance"] = balances[-1]
+        out.attrs["min_balance"] = min(balances)
     return out
 
 
@@ -391,6 +483,7 @@ def _read_bank_xlsx(path: str) -> pd.DataFrame:
     out.attrs["ftype"] = "statement"
     out.attrs["opening_balance"] = opening
     if balances:                                     # عمود الرصيد الحقيقي — أدق من إعادة البناء
+        out.attrs["balances"] = balances
         out.attrs["closing_balance"] = balances[-1]
         out.attrs["min_balance"] = min(balances)
     return out

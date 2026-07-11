@@ -188,10 +188,18 @@ def _view_model(a, lang):
         "decision_head": None, "decision_detail": None,
         "summary": i18n.summary_sentence(a, lang),
         "status_key": band_txt, "safety_label": i18n.safety_label(a.safety_band, lang),
+        # «يحتاج توضيحك» له قسمه الخاص — لا نكرره وسط المخاطر
         "risks": [{"badge": i18n.priority_badge(f.get("severity", "medium"), lang),
                    "title": i18n.finding_title(f, lang), "text": i18n.finding_text(f, lang)}
-                  for f in a.findings],
+                  for f in a.findings
+                  if f["key"] not in ("unknown_inflows", "recurring_payees")],
         "chain": i18n.risk_chain_sentences(a, lang),
+        "shock": i18n.shock_sentence(a, lang),
+        "best_news": i18n.best_news(a, lang),
+        "data_quality": [i18n.dq_text(x, lang) for x in a.data_quality],
+        # «يحتاج توضيحك» — المجهول يُعرض ويُسأل عنه، لا يُخمَّن (يشمل المدفوعات المتكررة)
+        "clarify": [i18n.finding_text(f, lang) for f in a.findings
+                    if f["key"] in ("unknown_inflows", "recurring_payees")],
         "recs": [i18n.rec_text(r, lang) for r in a.recommendations],
         "savings_line": i18n.savings_sentence(a.total_savings, lang) if a.total_savings > 0 else None,
         "survival_line": (i18n.survival_sentence(a.survival_days, lang)
