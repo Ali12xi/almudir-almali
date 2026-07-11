@@ -31,7 +31,7 @@
     {% if vm.risks %}
     <div class="risks">
       <h3>{{ t.hidden }}</h3>
-      {% for r in vm.risks %}<div class="r"><strong>{{ r.title }}:</strong> {{ r.text }}</div>{% endfor %}
+      {% for r in vm.risks %}<div class="r"><span class="pri">{{ r.badge }}</span> <strong>{{ r.title }}:</strong> {{ r.text }}</div>{% endfor %}
     </div>
     {% endif %}
     <div class="risks">
@@ -63,6 +63,13 @@
       <div class="hero-card">
         <div class="hv" style="color:{{ band_col }}">{{ a.safety_score }}<span class="hsm">/100</span></div>
         <div class="hl">{{ t.safety }} · {{ vm.safety_label }}</div>
+        {% if vm.score_breakdown %}
+        <div class="score-bd">
+          {% for reason, pts in vm.score_breakdown %}
+          <div><span style="color:{{ 'var(--green)' if pts>0 else 'var(--red)' }}">{{ '+' if pts>0 else '' }}{{ pts }}</span> {{ reason }}</div>
+          {% endfor %}
+        </div>
+        {% endif %}
       </div>
       {% if a.survival_days is not none %}
       <div class="hero-card">
@@ -119,10 +126,17 @@
     </div>
     {% endif %}
 
+    {% if vm.chain %}
+    <div class="chain">
+      <h3>{{ t.chain_t }}</h3>
+      {% for c in vm.chain %}<p class="chain-step">{{ c }}</p>{% endfor %}
+    </div>
+    {% endif %}
+
     {% if vm.risks %}
     <div class="risks">
       <h3>{{ t.hidden }}</h3>
-      {% for r in vm.risks %}<div class="r">{{ r }}</div>{% endfor %}
+      {% for r in vm.risks %}<div class="r"><span class="pri">{{ r.badge }}</span> <strong>{{ r.title }}:</strong> {{ r.text }}</div>{% endfor %}
     </div>
     {% endif %}
 

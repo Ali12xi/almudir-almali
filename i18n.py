@@ -26,6 +26,22 @@ def timeframe_word(tf, lang):
             "yearly": ("سنوياً", "per year")}.get(tf, ("", ""))[0 if lang == "ar" else 1]
 
 
+# ---------- ترتيب المخاطر بالأولوية (طلب المستثمر: 🔴 عاجل / 🟠 متوسط / 🟢 مراقبة) ----------
+def priority_badge(severity, lang) -> str:
+    m = {"high": ("🔴 عاجل", "🔴 Urgent"),
+         "medium": ("🟠 متوسط", "🟠 Moderate"),
+         "low": ("🟢 مراقبة", "🟢 Watch")}
+    return m.get(severity, m["medium"])[0 if lang == "ar" else 1]
+
+
+def priority_word(severity, lang) -> str:
+    """كلمة الأولوية بلا إيموجي — للتقرير PDF (خط Amiri لا يصيّر إيموجي ملوّناً)."""
+    m = {"high": ("عاجل", "Urgent"),
+         "medium": ("متوسط", "Moderate"),
+         "low": ("مراقبة", "Watch")}
+    return m.get(severity, m["medium"])[0 if lang == "ar" else 1]
+
+
 # ---------- عناوين شارات المخاطر ----------
 def finding_title(f, lang) -> str:
     k = f["key"]
@@ -48,6 +64,28 @@ def finding_title(f, lang) -> str:
         return "أثر توظيف موظف جديد" if lang == "ar" else "Impact of a new hire"
     if k == "salary_concentration":
         return "تركّز الرواتب في موظف" if lang == "ar" else "Salary concentration"
+    if k == "receivables_crisis":
+        return "أزمة تحصيل (ذمم متراكمة)" if lang == "ar" else "Collection crisis (piling receivables)"
+    if k == "large_asset_purchase":
+        return "شراء أصل كبير في وقت حسّاس" if lang == "ar" else "Large asset purchase at a tight time"
+    if k == "fixed_obligations":
+        return "التزامات ثابتة تفوق نقدك الداخل" if lang == "ar" else "Fixed commitments exceed cash coming in"
+    if k == "overdraft":
+        return "سحب على المكشوف — الحساب دخل السالب" if lang == "ar" else "Overdraft — the account went negative"
+    if k == "operating_bleed":
+        return "نزيف تشغيلي متكرر" if lang == "ar" else "Recurring operating loss"
+    if k == "unknown_inflows":
+        return "وارد غير مُوضّح يحتاج توضيحك" if lang == "ar" else "Unexplained inflows need your input"
+    if k == "marketing_spike":
+        return "قفزة في التسويق — راجع الجدوى" if lang == "ar" else "Marketing jumped — review its return"
+    if k == "duplicate_payment":
+        return "دفعة مكررة محتملة — تحقّق" if lang == "ar" else "Possible duplicate payment — verify"
+    if k == "escalating_payments":
+        return "مدفوعات متصاعدة لجهة واحدة" if lang == "ar" else "Escalating payments to one party"
+    if k == "client_vanished":
+        return "عميل منتظم توقّف" if lang == "ar" else "A regular client went quiet"
+    if k == "penalties":
+        return "غرامات ومخالفات قابلة للتفادي" if lang == "ar" else "Avoidable fines & penalties"
     return ""
 
 
@@ -55,11 +93,14 @@ def finding_title(f, lang) -> str:
 def finding_text(f, lang) -> str:
     k, d = f["key"], f["data"]
     if k == "customer_concentration":
+        days = d.get("days_if_lost")
         if lang == "ar":
-            return (f"أكبر مصدر وارد ({d['name']}) يمثّل {pct(d['share'])} من الوارد إلى حسابك. "
-                    f"لو توقّف، ينقص وارِدك حوالي {money(d['monthly'], 'ar')} شهرياً.")
-        return (f"Your largest inflow source ({d['name']}) makes up {pct(d['share'])} of money coming in. "
-                f"If it stops, your inflows drop about {money(d['monthly'], 'en')} per month.")
+            s = (f"أكبر مصدر وارد ({d['name']}) يمثّل {pct(d['share'])} من الوارد إلى حسابك. "
+                 f"لو توقّف، ينقص وارِدك حوالي {money(d['monthly'], 'ar')} شهرياً")
+            return s + (f" — وسيولتك تكفي ~{days:.0f} يوم فقط بعد فقده." if days else ".")
+        s = (f"Your largest inflow source ({d['name']}) makes up {pct(d['share'])} of money coming in. "
+             f"If it stops, your inflows drop about {money(d['monthly'], 'en')} per month")
+        return s + (f" — and your cash would last only ~{days:.0f} days after losing it." if days else ".")
     if k == "margin_erosion":
         if lang == "ar":
             return (f"نسبة صافي تدفقك النقدي نزلت من {pct(d['first'])} إلى {pct(d['last'])} خلال الفترة "
@@ -116,12 +157,123 @@ def finding_text(f, lang) -> str:
                     f"({money(d['amount'],'ar')}). اعتماد كبير على شخص واحد.")
         return (f"Your highest salary ({d['name']}) is {pct(d['share'])} of total payroll "
                 f"({money(d['amount'],'en')}). Heavy dependence on one person.")
+    if k == "receivables_crisis":
+        if lang == "ar":
+            return (f"أصدرت فواتير بـ{money(d['invoiced'],'ar')} لكن حصّلت {money(d['collected'],'ar')} فقط "
+                    f"({pct(d['rate'])}). الفرق {money(d['receivables'],'ar')} عالق كذمم عند عملائك — "
+                    f"أرباحك على الورق جيدة، لكن نقدك الفعلي مضغوط. لاحق التحصيل قبل أن تخنقك السيولة.")
+        return (f"You invoiced {money(d['invoiced'],'en')} but collected only {money(d['collected'],'en')} "
+                f"({pct(d['rate'])}). The {money(d['receivables'],'en')} gap is stuck as receivables — "
+                f"profit looks fine on paper, but real cash is tight. Chase collections before cash chokes you.")
+    if k == "large_asset_purchase":
+        if lang == "ar":
+            mo = d.get("months_expense", 0)
+            return (f"رصدنا شراء أصل بـ{money(d['amount'],'ar')} ({d['party']}) — يعادل ~{mo:.0f} أشهر من "
+                    f"مصاريفك. شراء كبير لمرة في فترة فيها التزامات ثابتة؛ تأكد أنه لم يضغط سيولتك التشغيلية.")
+        mo = d.get("months_expense", 0)
+        return (f"We spotted a {money(d['amount'],'en')} asset purchase ({d['party']}) — ~{mo:.0f} months of "
+                f"your expenses. A big one-off during fixed commitments; make sure it didn't strain operating cash.")
+    if k == "fixed_obligations":
+        comp = _fixed_components(d, lang)
+        if lang == "ar":
+            s = (f"التزاماتك النقدية الثابتة ~{money(d['fixed'],'ar')} شهرياً ({comp}) تُدفع نقداً "
+                 f"مهما تأخّر التحصيل — بينما يدخل حسابك فعلياً ~{money(d['cash_in'],'ar')} شهرياً. "
+                 f"أي أن التزاماتك الثابتة وحدها تعادل {pct(d['ratio'])} من نقدك الداخل.")
+            if d['fixed'] > d['cash_in']:
+                s += " الفرق يُغطّى من رصيدك كل شهر — ولو تراجع تحصيلك أكثر لن يصمد الرصيد طويلاً."
+            return s
+        s = (f"Your fixed cash commitments are ~{money(d['fixed'],'en')}/month ({comp}), paid in cash "
+             f"regardless of collections — while only ~{money(d['cash_in'],'en')}/month actually comes in. "
+             f"Fixed costs alone equal {pct(d['ratio'])} of your incoming cash.")
+        if d['fixed'] > d['cash_in']:
+            s += " The gap is covered from your balance every month — if collections slip further, it won't hold long."
+        return s
+    if k == "overdraft":
+        if lang == "ar":
+            return (f"رصيدك بدأ الفترة عند {money(d['opening'],'ar')} وانتهى عند {money(d['closing'],'ar')} "
+                    f"(سالب)، وبلغ أدنى نقطة {money(d['min'],'ar')}. الحساب دخل السحب على المكشوف فعلاً — "
+                    f"الرصيد بقي موجباً فترةً فقط بفضل التمويل، لا لأن النشاط رابح. هذه أخطر إشارة في الكشف.")
+        return (f"Your balance started the period at {money(d['opening'],'en')} and ended at {money(d['closing'],'en')} "
+                f"(negative), hitting a low of {money(d['min'],'en')}. The account actually went into overdraft — "
+                f"it stayed positive for a while only thanks to financing, not because the business was profitable. "
+                f"This is the most serious signal in the statement.")
+    if k == "operating_bleed":
+        if lang == "ar":
+            return (f"تدفقك التشغيلي (وارد النشاط ناقص مصروفه) كان سالباً في {d['neg']} من {d['total']} أشهر. "
+                    f"النشاط نفسه يخسر نقداً معظم السنة؛ ما ستره هو التمويل والتحويلات، وهي تنتهي.")
+        return (f"Your operating cash flow (activity income minus its costs) was negative in {d['neg']} of {d['total']} months. "
+                f"The business itself loses cash most of the year; financing and transfers masked it, and those run out.")
+    if k == "unknown_inflows":
+        if lang == "ar":
+            return (f"رصدنا {d['count']} حركة وارِدة بإجمالي {money(d['total'],'ar')} بمراجع بنكية مبهمة بلا جهة واضحة. "
+                    f"لم نصنّفها «مبيعات» تخميناً — وضّح مصدرها: إن كانت تمويلاً أو تحويلاً داخلياً فهي ليست إيراداً.")
+        return (f"We found {d['count']} incoming transactions totaling {money(d['total'],'en')} with vague bank references and no clear source. "
+                f"We did not guess them as «sales» — please clarify: if they're financing or internal transfers, they aren't revenue.")
+    if k == "marketing_spike":
+        if lang == "ar":
+            return (f"مصروف «{d['category']}» ارتفع من ~{money(d['early'],'ar')} إلى ~{money(d['late'],'ar')} شهرياً. "
+                    f"قد يكون استثماراً مجدياً أو إنفاقاً بلا عائد — راجع أثره على المبيعات قبل الاستمرار "
+                    f"(لا نفترض أنه هدر، ولا نعدك بتوفير مضمون).")
+        return (f"Your «{d['category']}» spend rose from ~{money(d['early'],'en')} to ~{money(d['late'],'en')}/month. "
+                f"It may be a worthwhile investment or spend with no return — check its effect on sales before continuing "
+                f"(we don't assume it's waste, nor promise guaranteed savings).")
+    if k == "duplicate_payment":
+        if lang == "ar":
+            return (f"دفعتان متطابقتان لـ«{d['party']}» بمبلغ {money(d['amount'],'ar')} لكلٍّ منهما، "
+                    f"بفارق {d['days']} أيام فقط ({d['date1']} و{d['date2']}). قد تكون فاتورة دُفعت مرتين — "
+                    f"تحقّق منها؛ إن كانت مكررة فهذا مبلغ يمكن استرداده كاملاً.")
+        return (f"Two identical payments to «{d['party']}» of {money(d['amount'],'en')} each, "
+                f"just {d['days']} days apart ({d['date1']} and {d['date2']}). Possibly the same invoice paid twice — "
+                f"verify it; if duplicated, the full amount is recoverable.")
+    if k == "escalating_payments":
+        if lang == "ar":
+            return (f"مدفوعات لـ«{d['party']}» تتصاعد باطّراد: من {money(d['first'],'ar')} إلى "
+                    f"{money(d['last'],'ar')} عبر {d['n']} دفعات (إجمالي {money(d['total'],'ar')}). "
+                    f"نمط يستدعي المراجعة: من هذه الجهة؟ وما مقابل هذه المبالغ المتنامية؟")
+        return (f"Payments to «{d['party']}» climb steadily: from {money(d['first'],'en')} to "
+                f"{money(d['last'],'en')} across {d['n']} payments (total {money(d['total'],'en')}). "
+                f"A pattern worth reviewing: who is this party, and what are these growing amounts for?")
+    if k == "client_vanished":
+        if lang == "ar":
+            return (f"«{d['party']}» كان يدفع لك بانتظام (~{money(d['monthly'],'ar')} شهرياً لمدة "
+                    f"{d['months_active']} أشهر) ثم توقّف تماماً منذ {d['last_seen']}. "
+                    f"فقدت عميلاً؟ تواصل معه قبل أن يذهب دخله لمنافسك.")
+        return (f"«{d['party']}» paid you regularly (~{money(d['monthly'],'en')}/month for "
+                f"{d['months_active']} months) then stopped completely since {d['last_seen']}. "
+                f"Lost a client? Reach out before that income goes to a competitor.")
+    if k == "penalties":
+        if lang == "ar":
+            return (f"دفعت {money(d['total'],'ar')} غرامات ومخالفات ({d['count']} حركة: تأخير سداد/مخالفات). "
+                    f"هذا مبلغ قابل للتفادي بالكامل — جدولة السداد قبل الاستحقاق توقفه من المصدر.")
+        return (f"You paid {money(d['total'],'en')} in fines and penalties ({d['count']} items: late payments/violations). "
+                f"This is fully avoidable — scheduling payments before due dates stops it at the source.")
     return ""
+
+
+def _fixed_components(d, lang) -> str:
+    """يبني وصف مكوّنات الالتزامات الثابتة، ويعرض ما هو > 0 فقط."""
+    labels = [("salary", "رواتب", "payroll"), ("rent", "إيجار", "rent"), ("loan", "قرض", "loan")]
+    parts = []
+    for key, ar, en in labels:
+        v = d.get(key, 0) or 0
+        if v > 0:
+            name = ar if lang == "ar" else en
+            parts.append(f"{name} {money(v, lang)}")
+    sep = " + "
+    return sep.join(parts) if parts else ("ثابتة" if lang == "ar" else "fixed")
 
 
 # ---------- قرار الأسبوع ----------
 def decision_headline(sar, tf, lang, kind="save") -> str:
     tw = timeframe_word(tf, lang)
+    if kind == "collect":   # الرقم نقد عالق كذمم — نُحرّره لا نوفّره
+        if lang == "ar":
+            return f"قرار واحد هذا الأسبوع يمكن أن يُحرّر ~{money(sar,'ar')} عالقة كذمم لدى عملائك."
+        return f"One decision this week can free up ~{money(sar,'en')} stuck as receivables with your clients."
+    if kind == "recover":   # دفعة مكررة — استرداد محتمل بعد التحقق (لا وعد مؤكد)
+        if lang == "ar":
+            return f"تحقّق واحد هذا الأسبوع قد يسترد لك ~{money(sar,'ar')} — دفعة يبدو أنها كُررت."
+        return f"One verification this week could recover ~{money(sar,'en')} — a payment that looks duplicated."
     if kind == "protect":   # الرقم وارد مهدَّد (تركّز مصدر) — نحميه لا نوفّره
         if lang == "ar":
             return f"قرار واحد هذا الأسبوع يحمي ~{money(sar,'ar')} {tw} من وارِدك المعلّق على مصدر واحد."
@@ -134,6 +286,26 @@ def decision_headline(sar, tf, lang, kind="save") -> str:
 # ---------- التوصيات (أفعال قابلة للتنفيذ — لا تكرار للتشخيص) ----------
 def rec_text(item, lang) -> str:
     k, d = item.get("key"), item.get("data", {})
+    if k == "act_stop_bleed":
+        if lang == "ar":
+            base = ("حسابك دخل السالب (سحب على المكشوف). " if d.get("overdraft")
+                    else f"نشاطك خسر نقداً في {d['neg']} من {d['total']} أشهر. ")
+            return (base + "أوقف النزيف قبل أي شيء: راجع أكبر بنود المصروف الثابت (رواتب/إيجار/أقساط)، "
+                    "أعد جدولة أقساط التمويل مع البنك، وأوقف أي إنفاق غير أساسي هذا الأسبوع. "
+                    "لا تعتمد على أن التمويل سيغطّي الفجوة — فهو ينتهي.")
+        base = ("Your account went into overdraft. " if d.get("overdraft")
+                else f"Your activity lost cash in {d['neg']} of {d['total']} months. ")
+        return (base + "Stop the bleed first: review your largest fixed costs (payroll/rent/installments), "
+                "reschedule financing installments with the bank, and halt any non-essential spend this week. "
+                "Don't rely on financing to cover the gap — it runs out.")
+    if k == "act_chase_collections":
+        if lang == "ar":
+            return (f"لديك {money(d['receivables'],'ar')} عالقة كذمم لم تُحصّل (نسبة تحصيلك {pct(d['rate'])} فقط). "
+                    f"ابدأ حملة تحصيل فورية: اتصل بأكبر العملاء المتأخرين، اطلب دفعات مقدّمة، "
+                    f"وأوقف التوريد الآجل للمتعثّرين — كل ريال تُحصّله يطيل عمر سيولتك مباشرة.")
+        return (f"You have {money(d['receivables'],'en')} stuck as uncollected receivables (only {pct(d['rate'])} collected). "
+                f"Launch a collection push now: call your largest overdue clients, ask for advances, "
+                f"and pause credit sales to late payers — every riyal collected directly extends your runway.")
     if k == "act_cut_burn":
         if lang == "ar":
             return (f"قلّص مصاريفك بما لا يقل عن {money(d['burn'],'ar')} شهرياً لوقف نزيف "
@@ -179,6 +351,59 @@ def rec_text(item, lang) -> str:
         return (f"You have recurring auto-charges of ~{money(d['yearly'],'en')} per year "
                 f"({d['count']} vendors). Review them and cancel what you don't truly use — instant silent savings.")
     return finding_text(item, lang)
+
+
+# ---------- سلسلة السبب والنتيجة (محرك العلاقات المالية) ----------
+def risk_chain_sentences(a, lang) -> list:
+    """يحوّل سلاسل a.risk_chain إلى فقرات سردية سبب→نتيجة. هذا هو الفرق بين
+    «قارئ كشف» يعرض نقاطاً منفصلة و«مستشار» يشرح كيف تتصل الأحداث ببعضها."""
+    out = []
+    for link in getattr(a, "risk_chain", []):
+        kind, d = link["kind"], link["data"]
+        if kind == "accrual_squeeze":
+            comp = _fixed_components(d, lang)
+            if lang == "ar":
+                s = (f"مبيعاتك على الورق قوية ({money(d['invoiced'],'ar')})، "
+                     f"لكنك لم تُحصّل منها إلا {pct(d['rate'])} ({money(d['collected'],'ar')})؛ "
+                     f"فالنقد الفعلي الداخل إلى حسابك ~{money(d['cash_in_m'],'ar')} شهرياً فقط. "
+                     f"وفي المقابل تخرج التزامات ثابتة ~{money(d['fixed_m'],'ar')} شهرياً ({comp}) "
+                     f"تُدفع نقداً مهما تأخّر التحصيل. النتيجة: يخرج نقد أكثر مما يدخل بـ~{money(d['gap_m'],'ar')} "
+                     f"شهرياً، وأي تأخّر إضافي في التحصيل يقصّر عمر سيولتك مباشرة")
+                if d.get("survival_days"):
+                    s += f" — وبالمعدل الحالي تكفيك السيولة ~{d['survival_days']:.0f} يوم فقط."
+                else:
+                    s += "."
+                out.append(s)
+            else:
+                s = (f"On paper your sales are strong ({money(d['invoiced'],'en')}), "
+                     f"but you collected only {pct(d['rate'])} of them ({money(d['collected'],'en')}); "
+                     f"so real cash coming in is just ~{money(d['cash_in_m'],'en')}/month. "
+                     f"Meanwhile fixed commitments of ~{money(d['fixed_m'],'en')}/month ({comp}) "
+                     f"are paid in cash no matter what. The result: more cash leaves than arrives, by "
+                     f"~{money(d['gap_m'],'en')}/month, and any further delay in collections directly shortens your runway")
+                if d.get("survival_days"):
+                    s += f" — at the current rate your cash lasts only ~{d['survival_days']:.0f} days."
+                else:
+                    s += "."
+                out.append(s)
+        elif kind == "concentration_burn":
+            if lang == "ar":
+                s = (f"يعتمد {pct(d['share'])} من وارِدك على {d['name']}؛ لو تأخّر أو توقّف، "
+                     f"يسقط دخلك ~{money(d['monthly'],'ar')} شهرياً")
+                if d.get("days_if_lost"):
+                    s += f"، وتنتهي سيولتك خلال ~{d['days_if_lost']:.0f} يوم فقط. مصدر واحد يحمل خطر الشركة كله."
+                else:
+                    s += ". اعتماد على مصدر واحد يركّز خطر الشركة في نقطة واحدة."
+                out.append(s)
+            else:
+                s = (f"{pct(d['share'])} of your inflows ride on {d['name']}; if it slows or stops, "
+                     f"your income drops ~{money(d['monthly'],'en')}/month")
+                if d.get("days_if_lost"):
+                    s += f", and your cash runs out in ~{d['days_if_lost']:.0f} days. One source carries the whole company's risk."
+                else:
+                    s += ". Depending on one source concentrates all your risk in a single point."
+                out.append(s)
+    return out
 
 
 # ---------- جُمل التقرير (لغة تدفق نقدي صادقة — ليست ربحاً محاسبياً) ----------
@@ -288,16 +513,29 @@ def salary_sentence(a, lang) -> str:
 
 
 def recurring_sentence(a, lang) -> str:
-    """ملخص الالتزامات المتكررة الصامتة. الرقم السنوي تقدير مبني على استمرار
-    المعدل الحالي — نقولها صراحة (لا نعرضه كرقم مؤكد فوق بيانات قصيرة المدى)."""
+    """ملخص الالتزامات المتكررة الصامتة + إعادة تأطير الأكبر منها إلى «ألم» ملموس.
+    الرقم السنوي تقدير مبني على استمرار المعدل الحالي — نقولها صراحة."""
     monthly_total = sum(r["monthly"] for r in a.recurring)
+    top = max(a.recurring, key=lambda r: r["yearly"], default=None)
     if lang == "ar":
-        return (f"رصدنا {len(a.recurring)} التزاماً متكرراً بإجمالي ~{money(monthly_total,'ar')} شهرياً "
-                f"(~{money(a.recurring_yearly,'ar')} سنوياً لو استمر بمعدله الحالي) — "
-                f"راجعها فقد يكون فيها ما لا تستخدمه.")
-    return (f"We found {len(a.recurring)} recurring commitments totaling ~{money(monthly_total,'en')}/month "
-            f"(~{money(a.recurring_yearly,'en')}/year if it continues at this rate) — "
-            f"review them for anything you no longer use.")
+        s = (f"رصدنا {len(a.recurring)} التزاماً متكرراً بإجمالي ~{money(monthly_total,'ar')} شهرياً "
+             f"(~{money(a.recurring_yearly,'ar')} سنوياً لو استمر بمعدله الحالي).")
+        if top and top["yearly"] >= 6000:
+            s += (f" الأكبر منها «{top['party']}» وحده يسحب ~{money(top['yearly'],'ar')} سنوياً — "
+                  f"مبلغ يكفي لتوظيف مساعد بدوام جزئي. لم نجد في حركتك ما يدل على أنه ما زال مستخدماً، "
+                  f"فتأكّد من قيمته قبل التجديد القادم.")
+        else:
+            s += " راجعها فقد يكون فيها ما لا تستخدمه فعلاً."
+        return s
+    s = (f"We found {len(a.recurring)} recurring commitments totaling ~{money(monthly_total,'en')}/month "
+         f"(~{money(a.recurring_yearly,'en')}/year if it continues at this rate).")
+    if top and top["yearly"] >= 6000:
+        s += (f" The largest, «{top['party']}» alone, drains ~{money(top['yearly'],'en')}/year — "
+              f"enough to hire a part-time assistant. We saw no other activity suggesting it's still in use, "
+              f"so confirm its value before the next renewal.")
+    else:
+        s += " Review them for anything you no longer truly use."
+    return s
 
 
 # ---------- نصوص التقرير الثابتة ----------
@@ -316,6 +554,7 @@ REPORT = {
         "payroll": "قراءة الرواتب", "recurring": "التزامات متكررة صامتة",
         "emp": "موظف", "per_month": "شهرياً", "per_year": "سنوياً", "of_income": "من الوارد",
         "risks": "المخاطر المخفية", "todo": "ماذا تفعل الآن",
+        "chain": "سلسلة السبب والنتيجة", "priority": "الأولوية", "score_why": "لماذا هذا المؤشر؟",
         "footer": "تحليل تدفق نقدي مبني على كشف حسابك البنكي — يكشف حركة نقدك ومخاطرها، وليس صافي "
                   "الربح المحاسبي (الذي يحتاج فواتيرك ومصاريفك المستحقة). أداة استرشادية لا تغني عن "
                   "مراجعة محاسب مختص. — المدير المالي",
@@ -334,6 +573,7 @@ REPORT = {
         "payroll": "Payroll read", "recurring": "Silent recurring charges",
         "emp": "staff", "per_month": "per month", "per_year": "per year", "of_income": "of inflows",
         "risks": "Hidden risks", "todo": "What to do now",
+        "chain": "Cause & effect", "priority": "Priority", "score_why": "Why this score?",
         "footer": "A cash-flow analysis based on your bank statement — it surfaces how your cash moves "
                   "and its risks, not accounting net profit (which needs your invoices and accruals). "
                   "A guidance tool, not a substitute for a qualified accountant. — The Financial Director",
@@ -403,7 +643,7 @@ def ui(lang):
         "income": "الوارد", "expenses": "الصادر", "net": "صافي التدفق", "margin": "نسبة الصافي",
         "safety": "مؤشر الأمان النقدي", "survival": "أيام بقاء السيولة", "savings": "توفير ممكن سنوياً",
         "healthy": "تدفق نقدي موجب", "caution": "مستقر — مع تحفّظات", "risk": "التدفق يحتاج تدخّلاً",
-        "hidden": "المخاطر المخفية", "todo_t": "ماذا تفعل الآن", "payroll_t": "قراءة الرواتب",
+        "hidden": "المخاطر المخفية", "chain_t": "سلسلة السبب والنتيجة", "todo_t": "ماذا تفعل الآن", "payroll_t": "قراءة الرواتب",
         "recurring_t": "الالتزامات الصامتة", "summary_t": "ملخص الوضع النقدي",
         "cashflow_note": "هذه أرقام تدفق نقدي من كشف البنك — وليست صافي ربح محاسبي.",
         "payroll_mode": "تحليل الرواتب", "employees_t": "كشف الموظفين",
@@ -474,7 +714,7 @@ def ui(lang):
         "income": "Cash in", "expenses": "Cash out", "net": "Net cash flow", "margin": "Net ratio",
         "safety": "Cash safety score", "survival": "Cash survival days", "savings": "Possible yearly savings",
         "healthy": "Positive cash flow", "caution": "Stable — with caveats", "risk": "Cash flow needs action",
-        "hidden": "Hidden risks", "todo_t": "What to do now", "payroll_t": "Payroll read",
+        "hidden": "Hidden risks", "chain_t": "Cause & effect", "todo_t": "What to do now", "payroll_t": "Payroll read",
         "recurring_t": "Silent commitments", "summary_t": "Cash situation summary",
         "cashflow_note": "These are cash-flow figures from your bank statement — not accounting net profit.",
         "payroll_mode": "Payroll analysis", "employees_t": "Employees",

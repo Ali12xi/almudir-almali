@@ -153,8 +153,17 @@ footer .fcopy{font-size:13px;margin-top:14px;color:#7f97ad}
 .center{text-align:center;margin:8px 0 16px}
 .risks{background:#fff;border:1px solid var(--line);border-radius:var(--radius);padding:24px;margin-top:6px;box-shadow:var(--shadow-sm)}
 .risks h3{font-size:16.5px;color:var(--navy);margin-bottom:11px}
-.risks .r{border-top:1px solid var(--line);padding:12px 0;font-size:14.5px;color:var(--ink)}
+.risks .r{border-top:1px solid var(--line);padding:12px 0;font-size:14.5px;color:var(--ink);line-height:1.7}
 .risks .r:first-of-type{border-top:none}
+.pri{font-weight:700;font-size:13px;white-space:nowrap;margin-inline-end:5px}
+/* سلسلة السبب والنتيجة — محرك العلاقات المالية (السرد الذي يربط الأحداث) */
+.chain{background:linear-gradient(180deg,#fbfdff,#f2f7fc);border:1px solid var(--line);
+  border-inline-start:6px solid var(--navy);border-radius:var(--radius);padding:22px 24px;
+  margin-top:16px;box-shadow:var(--shadow-sm)}
+.chain h3{font-size:16.5px;color:var(--navy);margin-bottom:10px}
+.chain h3::before{content:"🔗";margin-inline-end:7px}
+.chain-step{color:var(--ink);font-size:15px;line-height:1.95;margin:0}
+.chain-step+.chain-step{margin-top:12px;padding-top:12px;border-top:1px dashed var(--line)}
 .dl{display:block;text-align:center;
   background:linear-gradient(180deg,var(--navy-2),var(--navy));color:#fff;text-decoration:none;
   padding:17px;border-radius:var(--radius-sm);font-size:17px;font-weight:700;margin:24px 0 10px;

@@ -41,6 +41,10 @@ class Analysis:
     salary_monthly: float = 0.0      # متوسط الرواتب شهرياً
     salary_ratio: float = 0.0        # الرواتب ÷ الدخل
     salary_count: int = 0            # عدد المستفيدين المميّزين (تقدير الموظفين)
+    score_breakdown: list = field(default_factory=list)  # [(reason, points)] تفكيك مؤشر الأمان
+    risk_chain: list = field(default_factory=list)  # [{kind, data}] سلسلة السبب والنتيجة (محرك العلاقات المالية)
+    fixed_monthly: float = 0.0       # إجمالي الالتزامات النقدية الثابتة شهرياً (رواتب+إيجار+قرض)
+    fixed_components: dict = field(default_factory=dict)  # {salary, rent, loan} تفكيك الالتزامات
     recurring: list = field(default_factory=list)  # [{party, monthly, yearly, months}] التزامات متكررة
     recurring_yearly: float = 0.0    # إجمالي الالتزامات المتكررة سنوياً
     # --- تشغيلي مقابل غير تشغيلي (فخ الربح الجوهري) ---
@@ -51,6 +55,21 @@ class Analysis:
     non_operating_in: float = 0.0
     non_operating_out: float = 0.0
     non_operating_items: list = field(default_factory=list)  # [(category, amount, direction)]
+    # --- استحقاق مقابل نقد (أزمة التدفق النقدي) ---
+    # لو الملف يفرّق الفاتورة الآجلة عن التحصيل: الفاتورة إيراد محاسبي وليست نقداً داخلاً.
+    is_accrual: bool = False          # هل الملف دفتر استحقاق (فيه فواتير + تحصيل منفصل)؟
+    invoiced_total: float = 0.0       # إجمالي الفواتير المصدرة (مبيعات آجلة)
+    collected_total: float = 0.0      # إجمالي التحصيل النقدي الفعلي
+    receivables: float = 0.0          # الذمم المدينة المتراكمة = فواتير - تحصيل
+    collection_rate: float = 0.0      # نسبة التحصيل من الفواتير
+    # --- الرصيد الجاري والسحب على المكشوف (الرصيد يخدع؛ نُعيد بناءه لنكشف الحقيقة) ---
+    opening_balance: float = 0.0     # الرصيد الافتتاحي (لُقط من الكشف، ليس عملية)
+    closing_balance: float | None = None  # الرصيد الختامي المُعاد بناؤه = افتتاحي + صافي الحركة
+    min_balance: float | None = None      # أدنى رصيد بلغه الحساب خلال الفترة
+    overdraft: bool = False          # هل دخل الحساب السالب (سحب على المكشوف)؟
+    neg_op_months: int = 0           # عدد الأشهر ذات التدفق التشغيلي السالب
+    op_months_total: int = 0         # إجمالي الأشهر (للنسبة)
+    unknown_inflows: dict = field(default_factory=dict)  # {count, total} وارد غير مُوضّح (نعترف لا نخمّن)
     # --- توجيه النوع (تحليل مخصّص لكل ملف) ---
     ftype: str = "statement"         # statement | payroll | budget
     employees: list = field(default_factory=list)  # [(name, amount, share)] كشف رواتب
@@ -74,6 +93,10 @@ class Analysis:
 def load_ledger(path: str) -> pd.DataFrame:
     df = extractors.extract(path)                     # طبقة موحّدة لكل الصيغ
     ftype = df.attrs.get("ftype", "statement")        # نوع الملف (يوجّه التحليل)
+    # أرصدة الكشف (تُلتقط مبكراً — عمليات النسخ اللاحقة قد تُسقط attrs)
+    opening = df.attrs.get("opening_balance", 0.0)
+    closing = df.attrs.get("closing_balance")
+    min_bal = df.attrs.get("min_balance")
     df["التاريخ"] = pd.to_datetime(df["التاريخ"], errors="coerce")
     df["المبلغ"] = pd.to_numeric(df["المبلغ"], errors="coerce").fillna(0.0)
     df = df[df["المبلغ"] > 0].copy()
@@ -85,15 +108,47 @@ def load_ledger(path: str) -> pd.DataFrame:
     else:
         df["التاريخ"] = df["التاريخ"].fillna(df["التاريخ"].dropna().iloc[0])
     df["ym"] = df["التاريخ"].dt.strftime("%Y-%m")
+    keep = {k: v for k, v in (("opening_balance", opening),
+                              ("closing_balance", closing),
+                              ("min_balance", min_bal)) if v is not None}
     df.attrs["ftype"] = ftype
+    df.attrs.update(keep)
     return df
+
+
+# علامات الفاتورة الآجلة (استحقاق، ليست نقداً) مقابل التحصيل النقدي الفعلي
+_INVOICE_RE = r"فاتورة|invoice|مبيعات\s*آجل|آجل|billed|accrual|مستحق\b"
+_COLLECT_RE = r"تحصيل|تسديد عميل|collect|receipt|سداد عميل|مقبوضات"
+
+
+def _detect_accrual(income_df):
+    """يكتشف إن كان الدخل يفرّق الفواتير الآجلة عن التحصيل النقدي.
+    يُرجع (is_accrual, invoiced, collected, cash_income_df)."""
+    if income_df.empty:
+        return False, 0.0, 0.0, income_df
+    blob = (income_df["التصنيف"].astype(str) + " " + income_df["البيان"].astype(str))
+    inv_mask = blob.str.contains(_INVOICE_RE, regex=True, case=False, na=False)
+    col_mask = blob.str.contains(_COLLECT_RE, regex=True, case=False, na=False)
+    invoiced = float(income_df[inv_mask]["المبلغ"].sum())
+    collected = float(income_df[col_mask]["المبلغ"].sum())
+    # استحقاق فعلي: توجد فواتير وتحصيل، والفواتير أكبر جوهرياً من التحصيل (تراكم ذمم)
+    is_accrual = bool(inv_mask.any() and col_mask.any() and invoiced > collected * 1.3)
+    if is_accrual:
+        # النقد الداخل = التحصيل فقط (+أي دخل غير فاتورة/تحصيل). الفواتير تُستبعد كـ"نقد".
+        cash_income_df = income_df[~inv_mask]
+    else:
+        cash_income_df = income_df
+    return is_accrual, invoiced, collected, cash_income_df
 
 
 def analyze(path: str, current_cash: float | None = None) -> Analysis:
     df = load_ledger(path)
     inc_mask = df["النوع"].astype(str).str.contains("دخل|إيراد|مبيع", regex=True)
-    income_df = df[inc_mask]
+    income_df_all = df[inc_mask]
     expense_df = df[~inc_mask]
+
+    # استحقاق مقابل نقد: لو الملف يفرّق الفاتورة عن التحصيل، النقد الداخل = التحصيل فقط
+    is_accrual, invoiced, collected, income_df = _detect_accrual(income_df_all)
 
     months = []
     for ym in sorted(df["ym"].unique()):
@@ -103,7 +158,7 @@ def analyze(path: str, current_cash: float | None = None) -> Analysis:
         months.append({"ym": ym, "income": inc, "expense": exp, "net": net,
                        "margin": (net / inc) if inc else 0.0})
 
-    total_income = float(income_df["المبلغ"].sum())
+    total_income = float(income_df["المبلغ"].sum())          # النقد الداخل الفعلي
     total_expense = float(expense_df["المبلغ"].sum())
     net_profit = total_income - total_expense
     avg_margin = (net_profit / total_income) if total_income else 0.0
@@ -114,6 +169,12 @@ def analyze(path: str, current_cash: float | None = None) -> Analysis:
         net_profit=net_profit, avg_margin=avg_margin,
         income_by_customer=[], expense_by_category=[],
     )
+    a.is_accrual = is_accrual
+    if is_accrual:
+        a.invoiced_total = invoiced
+        a.collected_total = collected
+        a.receivables = invoiced - collected
+        a.collection_rate = collected / invoiced if invoiced else 0.0
     a.ftype = df.attrs.get("ftype", "statement")
     n = max(1, len(months))
     a.avg_monthly_income = total_income / n
@@ -127,7 +188,7 @@ def analyze(path: str, current_cash: float | None = None) -> Analysis:
     # فخ الربح الجوهري: نستبعد رأس المال/التمويل/سحوبات المالك/سداد القروض/
     # التحويل الداخلي/التحصيل الضريبي من التركّز والنسب التشغيلية — بشفافية كاملة
     # (تُعرض في قسم منفصل، لا تُخفى، لكنها لا تشوّه "الإيراد الحقيقي").
-    non_op = extractors.NON_OPERATING | {"تحويل وارد غامض (غير تشغيلي)"}
+    non_op = extractors.NON_OPERATING | {"تحويل وارد غامض (غير تشغيلي)", "وارد غير مُوضّح (يحتاج توضيح)"}
     op_income_df = income_df[~income_df["التصنيف"].isin(non_op)]
     op_expense_df = expense_df[~expense_df["التصنيف"].isin(extractors.NON_OPERATING)]
     a.operating_income = float(op_income_df["المبلغ"].sum())
@@ -161,13 +222,20 @@ def analyze(path: str, current_cash: float | None = None) -> Analysis:
         (avg_monthly_op_income - avg_monthly_op_expense) / avg_monthly_op_income
         if avg_monthly_op_income > 0 else None)
 
+    # الرصيد يخدع: نُعيد بناء الرصيد الجاري من الافتتاحي + كل الحركات (بما فيها التمويل)
+    # لنكشف إن كان الحساب دخل السالب فعلاً — أوضح إشارة خطر في أي كشف، وكان النظام يعبرها.
+    a.opening_balance = float(df.attrs.get("opening_balance", 0.0) or 0.0)
+    _analyze_balance_and_bleed(a, df, op_income_df, op_expense_df)
+
     _analyze_payroll(a, expense_df)
+    _compute_fixed_obligations(a, expense_df)
     _detect_recurring(a, expense_df)
     _detect_findings(a, income_df, expense_df)
     _forecast_runway(a, current_cash)
     _compute_buffer(a, current_cash)
     _build_decision_and_recs(a)
     _compute_scores(a)
+    _build_risk_chain(a, expense_df)
     return a
 
 
@@ -235,10 +303,71 @@ def _analyze_payroll(a: Analysis, expense_df):
     n = max(1, len(a.months))
     a.salary_total = float(sal["المبلغ"].sum())
     a.salary_monthly = a.salary_total / n
-    # النسبة من الإيراد التشغيلي الحقيقي — لا الإجمالي (رأس مال/تمويل يخفّض النسبة كذباً)
-    base = a.operating_income or a.total_income
+    # النسبة من حجم النشاط الحقيقي: في وضع الاستحقاق نستخدم الفواتير (حجم الشركة)،
+    # لا التحصيل النقدي الصغير — وإلا تطلع نسبة مضلّلة (190%!) بسبب تأخر التحصيل.
+    base = a.invoiced_total if a.is_accrual and a.invoiced_total else (a.operating_income or a.total_income)
     a.salary_ratio = (a.salary_total / base) if base else 0.0
     a.salary_count = _count_employees(sal["الطرف"])
+
+
+# أنماط الالتزامات النقدية الثابتة (تُدفع نقداً كل شهر بغضّ النظر عن التحصيل)
+_RENT_RE = r"إيجار|ايجار|rent|lease"
+_LOAN_RE = r"قرض|قسط|أقساط|اقساط|تمويل|loan|installment|repayment"
+
+
+def _compute_fixed_obligations(a: Analysis, expense_df):
+    """يجمع الالتزامات النقدية الثابتة شهرياً (رواتب + إيجار + سداد قرض).
+    هذه تُدفع نقداً كل شهر مهما تأخّر التحصيل — لذلك تُقاس مقابل النقد الداخل الفعلي."""
+    if expense_df.empty:
+        return
+    n = max(1, len(a.months))
+    cat = expense_df["التصنيف"].astype(str)
+    ben = expense_df["البيان"].astype(str)
+    rent_mask = cat.str.contains(_RENT_RE, case=False, regex=True) | ben.str.contains(_RENT_RE, case=False, regex=True)
+    loan_mask = cat.str.contains(_LOAN_RE, case=False, regex=True) | ben.str.contains(_LOAN_RE, case=False, regex=True)
+    rent_m = float(expense_df[rent_mask]["المبلغ"].sum()) / n
+    loan_m = float(expense_df[loan_mask]["المبلغ"].sum()) / n
+    salary_m = a.salary_monthly
+    a.fixed_components = {"salary": salary_m, "rent": rent_m, "loan": loan_m}
+    a.fixed_monthly = salary_m + rent_m + loan_m
+
+
+def _analyze_balance_and_bleed(a: Analysis, df, op_income_df, op_expense_df):
+    """يكشف نزيف التشغيل شهرياً + يُعيد بناء الرصيد الجاري لكشف السحب على المكشوف.
+    الدرس الذي طلبه المراجع: الرصيد الموجب فترة طويلة بفضل القرض يخدع — والحقيقة أن
+    الحساب دخل السالب. أوضح إشارة خطر، وكان النظام يعبرها."""
+    yms = sorted(df["ym"].unique())
+    a.op_months_total = len(yms)
+    neg = 0
+    for ym in yms:
+        oi = float(op_income_df[op_income_df["ym"] == ym]["المبلغ"].sum())
+        oe = float(op_expense_df[op_expense_df["ym"] == ym]["المبلغ"].sum())
+        if oi - oe < 0:
+            neg += 1
+    a.neg_op_months = neg
+
+    # وارد غير مُوضّح (نعترف لا نخمّن) — نجمعه للعرض والمطالبة بالتوضيح
+    unk = df[(df["النوع"].astype(str).str.contains("دخل", regex=True)) &
+             (df["التصنيف"] == "وارد غير مُوضّح (يحتاج توضيح)")]
+    if not unk.empty:
+        a.unknown_inflows = {"count": int(len(unk)), "total": float(unk["المبلغ"].sum())}
+
+    # الرصيد: نفضّل عمود «الرصيد» الحقيقي من الكشف إن وُجد (أدق)؛ وإلا نعيد بناءه
+    # من الافتتاحي + الحركات. (دفتر الاستحقاق لا رصيد بنكي له — نتجاوزه.)
+    explicit_closing = df.attrs.get("closing_balance")
+    explicit_min = df.attrs.get("min_balance")
+    if explicit_closing is not None:
+        a.closing_balance = float(explicit_closing)
+        a.min_balance = float(explicit_min) if explicit_min is not None else a.closing_balance
+        a.overdraft = bool(a.min_balance < -1.0)
+    elif a.opening_balance and not a.is_accrual:
+        d = df.sort_values("التاريخ")
+        inc_mask = d["النوع"].astype(str).str.contains("دخل|إيراد|مبيع", regex=True)
+        signed = d["المبلغ"].where(inc_mask, -d["المبلغ"])
+        running = a.opening_balance + signed.cumsum()
+        a.min_balance = float(running.min())
+        a.closing_balance = float(running.iloc[-1])
+        a.overdraft = bool(a.min_balance < -1.0)
 
 
 # اشتراك خدمة رقمية "صامت" حقيقي: مبلغ صغير، ثابت شهرياً بالضبط، جهة خدمة/برمجيات.
@@ -285,40 +414,138 @@ def _detect_recurring(a: Analysis, expense_df):
 
 def _compute_scores(a: Analysis):
     """أرقام أبطال — كلها مشتقّة بشفافية من إشارات حقيقية (لا تخمين)."""
-    # 1) إجمالي التوفير السنوي القابل للتنفيذ (من قفزات المصاريف فقط — قابلة للفعل)
-    a.total_savings = sum(f["data"]["excess_year"]
-                          for f in a.findings if f["key"] == "expense_spike")
+    # 1) التوفير الممكن = الالتزامات المتكررة الصامتة القابلة للإلغاء فعلاً (رقم صادق).
+    #    ألغينا فبركة «التوفير من القفزات» — القفزة قد تكون سداد قرض/رأسمالي/موسمية، لا هدراً.
+    a.total_savings = a.recurring_yearly
 
     # 2) أيام بقاء السيولة
     if a.runway and a.runway.get("burning"):
         a.survival_days = a.runway["days"]
 
-    # 3) مؤشر الأمان النقدي (0–100) — يعتمد على مخاطر نقدية حقيقية فقط.
-    #    ملاحظة محاسبية: صافي التدفق ~0 (داخل≈خارج) طبيعي لحساب تمرّ منه الأموال،
-    #    وليس "خسارة" — فلا نعاقب عليه، ولا نستخدم "الهامش" كإشارة أمان.
+    # 3) مؤشر الأمان النقدي (0–100) — بتفكيك شفّاف (كل عامل مبرَّر ويُعرض للمستخدم).
     score = 100.0
-    if a.income_by_customer:                                    # تركّز مصدر الوارد (أخطر عامل بنيوي)
-        top = a.income_by_customer[0][2]
-        score -= 40 if top >= 0.60 else 28 if top >= 0.45 else 15 if top >= 0.30 else 0
-    if a.survival_days is not None:                            # احتراق نقدي فعلي (السيولة تنزل)
+    bd = []   # [(السبب، النقاط)]
+    def hit(reason, pts):
+        nonlocal score
+        if any(r == reason for r, _ in bd):    # لا نكرر نفس السبب (شفافية بلا حشو)
+            return
+        score += pts; bd.append((reason, pts))
+
+    # تركّز مصدر وارد حقيقي — نستبعد المصادر العامة (إيداع/عملاء متنوعون) كما في الكشف؛
+    # "عملاء متنوعون" تنويع لا تركّز، فلا نعاقب عليه (وإلا ظهر سبب لا يقابله اكتشاف).
+    real_src = [(n, amt, sh) for (n, amt, sh) in a.income_by_customer
+                if n not in extractors.GENERIC_SOURCES]
+    if real_src:
+        top = real_src[0][2]
+        p = -40 if top >= 0.60 else -28 if top >= 0.45 else -15 if top >= 0.30 else 0
+        if p: hit(f"اعتماد على مصدر واحد ({top*100:.0f}%)", p)
+    if a.is_accrual and a.collection_rate < 0.5:               # أزمة تحصيل (تتدرّج مع الحدّة)
+        p = -25 if a.collection_rate < 0.4 else -15
+        hit(f"تحصيل متأخر ({a.collection_rate*100:.0f}% فقط)", p)
+    if a.survival_days is not None:                            # احتراق نقدي فعلي
         d = a.survival_days
-        score -= 35 if d < 30 else 22 if d < 60 else 10 if d < 120 else 0
-    elif a.runway and a.runway.get("burning"):                 # يحترق لكن الرصيد غير معروف
-        score -= 15
-    for f in a.findings:                                       # اتجاهات نقدية سلبية حقيقية
-        if f["key"] in ("margin_erosion", "sales_up_profit_down"):
-            score -= 12
+        p = -35 if d < 30 else -25 if d < 60 else -12 if d < 120 else 0
+        if p: hit(f"السيولة تكفي {d:.0f} يوم فقط", p)
+    elif a.runway and a.runway.get("burning"):
+        hit("النقد يحترق شهرياً", -15)
+    for f in a.findings:
+        if f["key"] == "overdraft":                            # الحساب انكشف فعلاً — أخطر إشارة
+            hit("الحساب دخل السالب (سحب على المكشوف)", -30)
+        elif f["key"] == "operating_bleed":                    # النشاط يخسر معظم الأشهر
+            hit(f"نزيف تشغيلي {f['data']['neg']} من {f['data']['total']} أشهر", -20)
+        elif f["key"] in ("margin_erosion", "sales_up_profit_down"):
+            hit("اتجاه نقدي يتدهور", -12)
         elif f["key"] == "high_payroll":
-            score -= 8
+            hit("عبء رواتب مرتفع", -8)
+        elif f["key"] == "large_asset_purchase":
+            hit("شراء أصل كبير في وقت ضغط", -5)
+        elif f["key"] == "fixed_obligations":
+            hit("التزامات ثابتة تفوق النقد الداخل", -7)
+        elif f["key"] == "duplicate_payment":
+            hit("دفعة مكررة تحتاج تحققاً", -8)
+        elif f["key"] == "escalating_payments":
+            hit("مدفوعات متصاعدة لجهة واحدة", -10)
+        elif f["key"] == "client_vanished":
+            hit("عميل منتظم توقّف", -6)
+        elif f["key"] == "penalties":
+            hit("غرامات قابلة للتفادي", -4)
+        elif f["key"] == "recurring_crisis" or (f["key"] == "receivables_crisis" and not a.is_accrual):
+            pass
+    if a.recurring:
+        hit(f"اشتراكات صامتة ({len(a.recurring)})", -3)
+    if a.buffer_months and a.buffer_months >= 3:              # وسادة نقدية إيجابية
+        hit("وسادة نقدية جيدة", +8)
     a.safety_score = int(max(5, min(99, round(score))))
+    a.score_breakdown = bd
     a.safety_band = ("high_risk" if a.safety_score < 45
                      else "medium" if a.safety_score < 75 else "good")
 
 
 def _detect_findings(a: Analysis, income_df, expense_df):
-    """كشف المخاطر المخفية — بيانات فقط، بلا نصوص لغوية."""
+    """كشف المخاطر المخفية — بيانات فقط, بلا نصوص لغوية."""
     findings = []
     n_months = max(1, len(a.months))
+
+    # 00) السحب على المكشوف — الرصيد دخل السالب فعلاً (أخطر إشارة في كشف، وكان يُعبَر).
+    #     الدرس: الرصيد الموجب فترةً بفضل القرض يخدع؛ الحقيقة أن الحساب انكشف.
+    if a.overdraft and a.closing_balance is not None:
+        findings.append({
+            "key": "overdraft", "severity": "high",
+            "data": {"closing": a.closing_balance, "min": a.min_balance, "opening": a.opening_balance},
+            "sar": None, "timeframe": None,
+        })
+
+    # 00ب) نزيف تشغيلي متكرر — التدفق التشغيلي سالب في معظم الأشهر (النشاط نفسه يخسر).
+    if a.op_months_total >= 4 and a.neg_op_months >= max(3, round(a.op_months_total * 0.6)):
+        findings.append({
+            "key": "operating_bleed", "severity": "high",
+            "data": {"neg": a.neg_op_months, "total": a.op_months_total},
+            "sar": None, "timeframe": None,
+        })
+
+    # 00ج) وارد غير مُوضّح — نعترف ونطلب التوضيح بدل التخمين بثقة (ميزة ثقة، لا ضعف).
+    if a.unknown_inflows.get("count", 0) > 0:
+        findings.append({
+            "key": "unknown_inflows", "severity": "medium",
+            "data": dict(a.unknown_inflows),
+            "sar": None, "timeframe": None,
+        })
+
+    # 0) أزمة التدفق: فواتير كثيرة لكن التحصيل متأخر → ذمم مدينة متراكمة (أخطر رؤية)
+    if a.is_accrual and a.receivables > 0:
+        sev = "high" if a.collection_rate < 0.4 else "medium"
+        findings.append({
+            "key": "receivables_crisis", "severity": sev,
+            "data": {"invoiced": a.invoiced_total, "collected": a.collected_total,
+                     "receivables": a.receivables, "rate": a.collection_rate,
+                     "monthly_gap": a.receivables / n_months},
+            "sar": a.receivables, "timeframe": "total",
+        })
+
+    # 0ب) شراء أصل كبير لمرة واحدة في فترة ضغط سيولة (قرار توقيت)
+    #    الأصل = بند رأسمالي لمرة، نُنذر منه إذا كان كبيراً مقارنة بالتدفق الشهري الفعلي
+    #    (نستخدم النقد الداخل الحقيقي، لا المصاريف — أدق في وضع أزمة التحصيل).
+    _ASSET_RE = (r"أصول|أصل|معدات|أثاث|سيارة|مركبة|عقار|asset|equipment|"
+                 r"furniture|vehicle|capex")
+    asset_mask = (expense_df["التصنيف"].astype(str).str.contains(_ASSET_RE, regex=True, case=False, na=False)
+                  | expense_df["البيان"].astype(str).str.contains(
+                      r"شراء\s*(?:سيارة|مركبة|معدات|أثاث|عقار|أصل)", regex=True, case=False, na=False))
+    if asset_mask.any():
+        assets = expense_df[asset_mask]
+        top = assets.sort_values("المبلغ", ascending=False).iloc[0]
+        amount = float(top["المبلغ"])
+        monthly_cash = (a.total_income / n_months) or a.avg_monthly_expense
+        # نُنذر إذا الأصل يفوق نصف شهر من النقد الداخل أو 20 ألف (لمرة، قرار توقيت)
+        if amount >= max(20000, 0.5 * monthly_cash):
+            party = str(top["الطرف"])
+            if party in extractors.GENERIC_SOURCES or party.startswith("أصول"):
+                party = str(top["البيان"])[:40]        # الوصف أوضح من تسمية تصنيفية
+            findings.append({
+                "key": "large_asset_purchase", "severity": "medium",
+                "data": {"amount": amount, "party": party,
+                         "months_expense": amount / monthly_cash if monthly_cash else 0},
+                "sar": None, "timeframe": None,
+            })
 
     # 1) تركّز مصدر وارد حقيقي — نستبعد المصادر العامة (إيداع نقدي/تحويلات/رسوم):
     #    الإيداع النقدي ليس "عميلاً" يُخشى فقدانه، بل مبيعات نقدية. لا ننذر خطأً.
@@ -327,10 +554,17 @@ def _detect_findings(a: Analysis, income_df, expense_df):
     if real_sources:
         name, amt, share = real_sources[0]
         if share >= 0.30:
+            data = {"name": name, "share": share, "monthly": amt / n_months}
+            # تقدير الخطر بالأيام: لو فقدت هذا المصدر، كم يوماً تصمد السيولة؟
+            # (نحتاج الرصيد الحالي + معدل الحرق بعد فقده)
+            if a.cash and a.avg_monthly_expense > 0:
+                monthly_in_after = (a.total_income / n_months) - (amt / n_months)
+                burn_after = a.avg_monthly_expense - monthly_in_after
+                if burn_after > 0:
+                    data["days_if_lost"] = (a.cash / burn_after) * 30
             findings.append({
                 "key": "customer_concentration", "severity": "high",
-                "data": {"name": name, "share": share, "monthly": amt / n_months},
-                "sar": amt / n_months, "timeframe": "monthly",
+                "data": data, "sar": amt / n_months, "timeframe": "monthly",
             })
 
     # 2) تآكل الهامش
@@ -352,24 +586,27 @@ def _detect_findings(a: Analysis, income_df, expense_df):
                 "data": {}, "sar": None, "timeframe": None,
             })
 
-    # 4) قفزة في مصروف (متوسط آخر شهرين مقابل أول شهرين لكل تصنيف)
+    # 4) قفزة في مصروف تسويقي فقط — بند تقديري يستحقّ مراجعة الجدوى.
+    #    مبدأ حاسم (طلب المراجع): «القفزة ≠ هدر». معظم القفزات سداد قرض/رأسمالي/موسمية/غرامة
+    #    مرة واحدة — لا نفبرك «توفيراً» منها ولا نبني عليها قراراً. نقتصر على التسويق (تقديري
+    #    حقيقي)، ونعرضه كـ«راجع الجدوى» لا كـ«ستوفّر X مضمونة». (sar=None ← ليس رافعة قرار.)
     if len(a.months) >= 4:
         early = [m["ym"] for m in a.months[:2]]
         late = [m["ym"] for m in a.months[-2:]]
-        spikes = []
-        for cat in expense_df["التصنيف"].astype(str).unique():
-            c = expense_df[expense_df["التصنيف"].astype(str) == cat]
+        mkt_re = r"تسويق|إعلان|marketing|ads|دعاية"
+        op_exp = expense_df[~expense_df["التصنيف"].isin(extractors.NON_OPERATING)]
+        mkt = op_exp[op_exp["التصنيف"].astype(str).str.contains(mkt_re, regex=True, na=False)]
+        for cat in mkt["التصنيف"].astype(str).unique():
+            c = mkt[mkt["التصنيف"].astype(str) == cat]
             early_avg = c[c["ym"].isin(early)]["المبلغ"].sum() / 2
             late_avg = c[c["ym"].isin(late)]["المبلغ"].sum() / 2
             if early_avg > 0 and late_avg > early_avg * 1.6:
-                spikes.append({
-                    "key": "expense_spike", "severity": "medium",
+                findings.append({
+                    "key": "marketing_spike", "severity": "low",
                     "data": {"category": cat, "early": early_avg, "late": late_avg,
-                             "excess_year": (late_avg - early_avg) * 12},
-                    "sar": (late_avg - early_avg) * 12, "timeframe": "yearly",
+                             "extra_year": (late_avg - early_avg) * 12},
+                    "sar": None, "timeframe": None,
                 })
-        spikes.sort(key=lambda f: f["sar"], reverse=True)
-        findings.extend(spikes)
 
     # 5) وسادة تدفق رقيقة — نُظهرها فقط عند احتراق نقدي فعلي (الرصيد ينزل).
     #    صافي تدفق ~0 لحساب متوازن (داخل≈خارج) طبيعي، وليس خطراً — فلا ننذر عبثاً.
@@ -382,7 +619,7 @@ def _detect_findings(a: Analysis, income_df, expense_df):
             "sar": None, "timeframe": None,
         })
 
-    # 6) عبء الرواتب مرتفع (الرواتب تلتهم نسبة كبيرة من الدخل)
+    # 6) عبء الرواتب مرتفع (الرواتب تلتهم نسبة كبيرة من حجم النشاط)
     if a.salary_total > 0 and a.salary_ratio >= 0.40:
         findings.append({
             "key": "high_payroll",
@@ -391,7 +628,105 @@ def _detect_findings(a: Analysis, income_df, expense_df):
             "sar": None, "timeframe": None,
         })
 
+    # 7) التزامات نقدية ثابتة مرتفعة مقابل النقد الداخل الفعلي (رواتب+إيجار+قرض)
+    #    الجوهر: هذه تُدفع نقداً كل شهر مهما تأخّر التحصيل. لو فاقت النقد الداخل، الخطر مباشر.
+    if a.fixed_monthly > 0:
+        cash_in_m = a.total_income / n_months
+        ratio = a.fixed_monthly / cash_in_m if cash_in_m > 0 else 99.0
+        if ratio >= 0.5 or a.fixed_monthly > cash_in_m:
+            findings.append({
+                "key": "fixed_obligations",
+                "severity": "high" if a.fixed_monthly > cash_in_m else "medium",
+                "data": {"fixed": a.fixed_monthly, "cash_in": cash_in_m, "ratio": ratio,
+                         "salary": a.fixed_components.get("salary", 0.0),
+                         "rent": a.fixed_components.get("rent", 0.0),
+                         "loan": a.fixed_components.get("loan", 0.0)},
+                "sar": None, "timeframe": None,
+            })
+
+    # 8) الغرامات والمخالفات — كانت تذوب في «رسوم» فيغيب مبلغ قابل للتفادي كلياً
+    pen_mask = (expense_df["التصنيف"].astype(str).str.contains("غرامات", na=False)
+                | expense_df["البيان"].astype(str).str.contains(
+                    r"غرامة|مخالفة|penalty|late\s*fee", regex=True, case=False, na=False))
+    if pen_mask.any():
+        pen_total = float(expense_df[pen_mask]["المبلغ"].sum())
+        if pen_total >= 1000:
+            findings.append({
+                "key": "penalties", "severity": "medium",
+                "data": {"total": pen_total, "count": int(pen_mask.sum())},
+                "sar": None, "timeframe": None,
+            })
+
+    # كاشف الحالات الشاذة — «مين يسرقني ووين أنزف»: هذا ما يدفع المستخدم مقابله.
+    findings.extend(_detect_anomalies(a, income_df, expense_df))
+
+    # ترتيب المخاطر بالأولوية: عاجل (high) ثم متوسط ثم مراقبة — أهم خطر أولاً (طلب المستثمر).
+    _sev = {"high": 0, "medium": 1, "low": 2}
+    findings.sort(key=lambda f: _sev.get(f.get("severity"), 3))
     a.findings = findings
+
+
+def _detect_anomalies(a: Analysis, income_df, expense_df) -> list:
+    """شذوذ يستدعي المراجعة: دفعة مكررة، مدفوعات متصاعدة لجهة واحدة، عميل توقّف.
+    كلها حتمية وصياغتها «تحقّق» لا «اتهام» — نعرض النمط والمبلغ ونطلب مراجعته."""
+    out = []
+    non_op = extractors.NON_OPERATING
+
+    # 1) دفعة مكررة: نفس الجهة + نفس المبلغ + خلال ≤7 أيام + مبلغ معتبر (≥5000)
+    ex = expense_df[~expense_df["التصنيف"].isin(non_op)].sort_values("التاريخ")
+    for (party, amt), g in ex.groupby(["الطرف", "المبلغ"]):
+        if len(g) < 2 or amt < 5000 or str(party) in extractors.GENERIC_SOURCES:
+            continue
+        dts = g["التاريخ"].tolist()
+        for i in range(len(dts) - 1):
+            gap = (dts[i + 1] - dts[i]).days
+            if 0 <= gap <= 7:
+                out.append({
+                    "key": "duplicate_payment", "severity": "high",
+                    "data": {"party": str(party), "amount": float(amt), "days": gap,
+                             "date1": dts[i].strftime("%Y-%m-%d"),
+                             "date2": dts[i + 1].strftime("%Y-%m-%d")},
+                    "sar": float(amt), "timeframe": "total",
+                })
+                break
+
+    # 2) مدفوعات متصاعدة لجهة واحدة: ≥4 دفعات، كل دفعة أكبر من سابقتها، والأخيرة ≥2.5× الأولى
+    ex_named = ex[~ex["التصنيف"].astype(str).str.contains(_SALARY_RE, regex=True, case=False)]
+    for party, g in ex_named.groupby("الطرف"):
+        if str(party) in extractors.GENERIC_SOURCES or len(g) < 4:
+            continue
+        amts = g.sort_values("التاريخ")["المبلغ"].tolist()
+        increasing = all(b > a_ for a_, b in zip(amts, amts[1:]))
+        if increasing and amts[0] > 0 and amts[-1] >= amts[0] * 2.5 and sum(amts) >= 20000:
+            out.append({
+                "key": "escalating_payments", "severity": "high",
+                "data": {"party": str(party), "n": len(amts), "first": float(amts[0]),
+                         "last": float(amts[-1]), "total": float(sum(amts))},
+                "sar": None, "timeframe": None,
+            })
+
+    # 3) عميل توقّف: مصدر دخل تشغيلي منتظم (≥4 أشهر) اختفى في آخر شهرين من الفترة
+    inc = income_df[~income_df["التصنيف"].isin(non_op)]
+    if not inc.empty and len(a.months) >= 6:
+        end = inc["التاريخ"].max()
+        last_yms = {m["ym"] for m in a.months[-2:]}
+        for party, g in inc.groupby("الطرف"):
+            if str(party) in extractors.GENERIC_SOURCES:
+                continue
+            yms = set(g["ym"].unique())
+            monthly_avg = float(g["المبلغ"].sum()) / max(1, len(yms))
+            if len(yms) >= 4 and monthly_avg >= 5000 and not (yms & last_yms):
+                last_seen = g["التاريخ"].max()
+                gap_days = (end - last_seen).days
+                if gap_days >= 55:
+                    out.append({
+                        "key": "client_vanished", "severity": "medium",
+                        "data": {"party": str(party), "monthly": monthly_avg,
+                                 "last_seen": last_seen.strftime("%Y-%m"),
+                                 "months_active": len(yms)},
+                        "sar": None, "timeframe": None,
+                    })
+    return out
 
 
 def _forecast_runway(a: Analysis, current_cash: float | None):
@@ -423,12 +758,27 @@ def _build_decision_and_recs(a: Analysis):
 
     if levers:
         top = levers[0]
-        # نوع القرار: تركّز العملاء = حماية دخل مهدَّد؛ غيره = توفير مباشر. الصياغة تختلف.
-        kind = "protect" if top["key"] == "customer_concentration" else "save"
+        # نوع القرار يحدّد الصياغة: تركّز العملاء = حماية دخل مهدَّد؛
+        # أزمة تحصيل = تحرير نقد عالق (ليس توفيراً)؛ غيرهما = توفير مباشر.
+        kind = ("protect" if top["key"] == "customer_concentration"
+                else "collect" if top["key"] == "receivables_crisis"
+                else "recover" if top["key"] == "duplicate_payment"
+                else "save")
         a.decision = {"sar": top["sar"], "timeframe": top["timeframe"], "finding": top, "kind": kind}
 
     recs = []
-    # السيولة أولاً — أخطر تهديد
+    # الأخطر أولاً: حساب مكشوف أو نزيف تشغيلي متكرر — يتقدّم على كل شيء.
+    if a.overdraft or (a.op_months_total >= 4 and
+                       a.neg_op_months >= max(3, round(a.op_months_total * 0.6))):
+        recs.append({"key": "act_stop_bleed",
+                     "data": {"neg": a.neg_op_months, "total": a.op_months_total,
+                              "closing": a.closing_balance, "overdraft": a.overdraft}})
+    # الجذر: أزمة التحصيل هي سبب شحّ النقد — ملاحقة التحصيل تعالج السبب لا العرض.
+    rc = next((f for f in a.findings if f["key"] == "receivables_crisis"), None)
+    if rc:
+        recs.append({"key": "act_chase_collections",
+                     "data": {"receivables": rc["data"]["receivables"], "rate": rc["data"]["rate"]}})
+    # السيولة ثانياً — وقف النزيف النقدي
     if a.runway and a.runway.get("burning"):
         recs.append({"key": "act_cut_burn", "data": {"burn": a.runway["burn"]}})
 
@@ -437,8 +787,10 @@ def _build_decision_and_recs(a: Analysis):
     for f in levers:
         if f["key"] == "customer_concentration" and a.income_by_customer:
             top_amt = a.income_by_customer[0][1]                # إجمالي دخل أكبر عميل
-            # الدخل الجديد المطلوب لتنزيل حصته تحت 50%:  top/(total+N) < 0.5 → N > 2·top − total
-            need_monthly = max(0.0, (2 * top_amt - a.total_income)) / n
+            # الدخل الجديد المطلوب لتنزيل حصته تحت 50%:  top/(op+N) < 0.5 → N > 2·top − op
+            # (نحسبها من الإيراد التشغيلي — الإجمالي الخام المنتفخ بالتمويل يعطي «أضف 0»)
+            base_income = a.operating_income or a.total_income
+            need_monthly = max(0.0, (2 * top_amt - base_income)) / n
             recs.append({"key": "act_diversify",
                          "data": {"share": f["data"]["share"], "monthly_new": need_monthly}})
         elif f["key"] == "expense_spike":
@@ -462,3 +814,43 @@ def _build_decision_and_recs(a: Analysis):
                      "data": {"yearly": a.recurring_yearly, "count": len(a.recurring)}})
 
     a.recommendations = recs[:3]
+
+
+def _build_risk_chain(a: Analysis, expense_df):
+    """محرك العلاقات المالية — يربط الإشارات في سلسلة سبب→نتيجة واحدة بدل نقاط منفصلة.
+    لا يخترع شيئاً: كل حلقة رقم حقيقي مشتقّ من الكشف. هذا ما يحوّل «قارئ كشف»
+    إلى «مستشار» يفهم الشركة (الفرق الذي طلبه المستثمر)."""
+    chain = []
+    n = max(1, len(a.months))
+    cash_in_m = a.total_income / n
+
+    # 1) سلسلة عصر السيولة: مبيعات آجلة كبيرة + تحصيل ضعيف + التزامات ثابتة تُدفع نقداً.
+    #    النتيجة الحتمية: النقد الداخل لا يغطّي الالتزامات، فتحترق السيولة.
+    if a.is_accrual and a.collection_rate < 0.6 and a.fixed_monthly > 0:
+        chain.append({
+            "kind": "accrual_squeeze",
+            "data": {
+                "invoiced": a.invoiced_total, "collected": a.collected_total,
+                "rate": a.collection_rate, "receivables": a.receivables,
+                "cash_in_m": cash_in_m, "fixed_m": a.fixed_monthly,
+                "salary": a.fixed_components.get("salary", 0.0),
+                "rent": a.fixed_components.get("rent", 0.0),
+                "loan": a.fixed_components.get("loan", 0.0),
+                "gap_m": a.fixed_monthly - cash_in_m,
+                "survival_days": a.survival_days,
+            },
+        })
+
+    # 2) سلسلة تركّز مصدر واحد + احتراق: فقد المصدر يُنهي السيولة خلال أيام معدودة.
+    real_src = [(nm, amt, sh) for (nm, amt, sh) in a.income_by_customer
+                if nm not in extractors.GENERIC_SOURCES]
+    if real_src and real_src[0][2] >= 0.30:
+        nm, amt, sh = real_src[0]
+        days = next((f["data"].get("days_if_lost") for f in a.findings
+                     if f["key"] == "customer_concentration"), None)
+        chain.append({
+            "kind": "concentration_burn",
+            "data": {"name": nm, "share": sh, "monthly": amt / n, "days_if_lost": days},
+        })
+
+    a.risk_chain = chain

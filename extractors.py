@@ -88,6 +88,11 @@ _TX_BLOCK = re.compile(
 # الترتيب من الأخص للأعم. "المصدر العام" = إيداع نقدي/تحويل/رسوم — ليس عميلاً يُخشى فقدانه.
 _TERM_RULES = [
     (r"راتب|رواتب|payroll|salary",                              "رواتب",           None,                    False),
+    # الغرامات قبل «سداد الفواتير» — «غرامة تأخير سداد» كانت تذوب في الرسوم فتختفي
+    (r"غرامة|مخالفة|penalty|late\s*fee",                        "غرامات ومخالفات", "غرامات ومخالفات",       True),
+    # الأصول الرأسمالية (شراء لمرة واحدة — ليست مصروفاً تشغيلياً متكرراً)
+    (r"شراء\s*(?:سيارة|مركبة|معدات|أثاث|عقار)|أصل\s*ثابت|أصول\s*ثابتة",
+     "أصول (شراء لمرة)", "أصول (شراء لمرة)", True),
     (r"محطة|وقود|fuel|petrol|الدريس|ساسكو|aramco|نفط",           "وقود ومحروقات",   "محطات وقود",            True),
     (r"إيجار|ايجار|\brent\b|عقار",                               "إيجار",           "إيجار",                 True),
     (r"سناب|snap|قوقل|google|meta|facebook|tiktok|إعلان|تسويق|ads", "تسويق وإعلان",  None,                    False),
@@ -101,24 +106,36 @@ _TERM_RULES = [
 # تسميات المصادر العامة — تُستبعَد من تحليل "تركّز العملاء" (ليست عملاء يمكن فقدانهم).
 GENERIC_SOURCES = {"إيداعات نقدية", "تحويلات بنكية", "رسوم وخدمات بنكية",
                    "مشتريات ونقاط بيع", "سداد فواتير وخدمات", "محطات وقود", "إيجار",
-                   "دخل غير مصنّف", "غير محدد"}
+                   "دخل غير مصنّف", "غير محدد", "سحوبات نقدية", "مصروفات أخرى",
+                   "رواتب", "تسويق وإعلان", "وقود ومحروقات",
+                   "عملاء متنوعون", "عملاء", "عميل", "متنوعون", "customers", "various"}
 
 # ---------- طبقة "تشغيلي مقابل غير تشغيلي" (فخ الربح الجوهري) ----------
 # رأس المال، التمويل، سحوبات المالك، سداد القروض، التحويلات الداخلية، وتحصيل الضريبة
 # ليست دخلاً أو مصروفاً تشغيلياً — تُقلب المؤشرات (تركّز عملاء مخفّف، هامش كاذب) لو خُلطت.
 # محلي بالكامل (regex)، يُطبَّق على أي بيانات مستخرجة بغضّ النظر عن مصدرها (AI أو حتمي).
 NON_OPERATING = {"رأس مال", "تمويل بنكي", "سحب شخصي (المالك)", "سداد تمويل",
-                 "تحويل داخلي بين الحسابات", "ضريبة محصّلة (تحصيل لا مصروف)"}
+                 "تحويل داخلي بين الحسابات", "ضريبة محصّلة (تحصيل لا مصروف)",
+                 "حساب الشريك (غير تشغيلي)", "شيك مرتجع (لا يُحتسب)",
+                 "وارد غير مُوضّح (يحتاج توضيح)"}
 
 _NON_OP_RULES = [
-    (r"رأس\s*مال|capital\s*injection|استثمار من الشريك|إيداع رأس مال", "رأس مال", True),
-    (r"تمويل\s*بنكي|تمويل من|bank financing|loan disbursement|قرض\s*جديد", "تمويل بنكي", True),
-    (r"سحب\s*شخصي|سحب\s*الشريك|owner draw|مسحوبات شخصية", "سحب شخصي (المالك)", False),
-    (r"سداد\s*قسط\s*تمويل|سداد\s*قرض|قسط\s*تمويل|loan\s*(?:installment|repayment)", "سداد تمويل", False),
+    (r"رأس\s*مال|capital\s*injection|ضخ\s*رأس|استثمار من الشريك|إيداع رأس مال", "رأس مال", True),
+    # تمويل إسلامي/بنكي (مرابحة/تورّق/إجارة) = قرض داخل، ليس إيراداً تشغيلياً
+    (r"مرابحة|تورّق|تورق|إجارة\s*منتهية|تمويل\s*بنكي|تمويل من|دفعة تمويل|"
+     r"bank financing|loan disbursement|قرض\s*جديد", "تمويل بنكي", True),
+    # حساب الشريك الجاري (ضخ/سحب من الشريك) — تمويل مالك لا مبيعات
+    (r"حساب\s*الشريك\s*الجاري|الشريك\s*الجاري|جاري\s*الشريك|دفعة من حساب الشريك",
+     "حساب الشريك (غير تشغيلي)", True),
+    (r"سحب\s*شخصي|سحب\s*الشريك|owner draw|مسحوبات شخصية|مصروفات الشريك", "سحب شخصي (المالك)", False),
+    (r"سداد\s*قسط\s*(?:تمويل|مرابحة)|سداد\s*قرض|قسط\s*تمويل|قسط\s*مرابحة|"
+     r"loan\s*(?:installment|repayment)", "سداد تمويل", False),
     # محدَّد بدقة: تحويل المالك بين حساباته/حسابات مؤسسته الخاصة — لا "التحويل الداخلي"
     # كمصطلح بنكي عام (بعض البنوك تستخدمه لأي تحويل بين عملائها، وهذا دخل حقيقي).
-    (r"لحساب\s*(?:المؤسسة|الشركة)\s*(?:الآخر|الثاني)|بين\s*حسابات\s*(?:المؤسسة|الشركة)|"
-     r"لحسابي\s*الآخر|internal\s*transfer\s*between\s*(?:own|company)\s*accounts",
+    # نشترط ذكر «حساب المؤسسة/الشركة/آخر» صراحةً حتى لا نبتلع تحويلات العملاء الحقيقية.
+    (r"(?:من|إلى|لـ|بين)\s*حساب(?:ات)?\s*(?:المؤسسة|الشركة|المالك|آخر|الآخر|الثاني)|"
+     r"حساب\s*المؤسسة\s*الآخر|لحسابي\s*الآخر|"
+     r"internal\s*transfer\s*between\s*(?:own|company)\s*accounts",
      "تحويل داخلي بين الحسابات", False),
     (r"ضريبة القيمة المضافة|zatca|هيئة الزكاة|vat remit", "ضريبة محصّلة (تحصيل لا مصروف)", False),
 ]
@@ -129,23 +146,65 @@ def tag_non_operating(df: pd.DataFrame) -> pd.DataFrame:
     بغضّ النظر عن مصدر الاستخراج — طبقة موحّدة تُطبَّق على أي بيانات بعد الاستخراج."""
     if df.empty:
         return df
+    # الرصيد الافتتاحي ليس عملية — نلتقط قيمته ونُسقطه، وإلا احتُسب «دخلاً» وهمياً
+    # (بالضبط ما وقع فيه التقرير: رصيد افتتاحي 310,000 ظهر كإيراد 9%). ونحفظه لإعادة
+    # بناء الرصيد الجاري (كشف السحب على المكشوف) لاحقاً.
+    ob_mask = df["البيان"].astype(str).str.contains(
+        r"رصيد\s*افتتاح|رصيد\s*سابق|رصيد\s*مُدوّر|opening\s*balance|balance\s*b/?f|\bb/f\b",
+        regex=True, case=False, na=False)
+    opening_balance = float(df.attrs.get("opening_balance", 0.0) or 0.0)  # لا نطمس قيمة قارئ سابق
+    if ob_mask.any():
+        opening_balance = opening_balance or float(df[ob_mask]["المبلغ"].iloc[0])
+        attrs = dict(df.attrs)
+        df = df[~ob_mask].copy()
+        df.attrs.update(attrs)
+    df.attrs["opening_balance"] = opening_balance
     blob = (df["البيان"].astype(str) + " " + df["الطرف"].astype(str)).str.lower()
     for pat, cat, _is_income in _NON_OP_RULES:
         mask = blob.str.contains(pat, regex=True, case=False, na=False)
         if mask.any():
             df.loc[mask, "التصنيف"] = cat
             df.loc[mask, "الطرف"] = cat
-    # تحويلات واردة غامضة (IPS أو "تحويل وارد" بلا اسم جهة حقيقي) — نكتشفها من النص
-    # مباشرة (بغضّ النظر عن تسمية التصنيف، اللي تختلف بين الذكاء الاصطناعي والمحلّل الحتمي).
-    # نتحقق من وجود اسم جهة حقيقي (شركة/مؤسسة أو اسم تاجر لاتيني نظيف)، لا أي كلمة إنجليزية.
+    # وارد غير مُوضّح: مرجع بنكي مبهم (IPS/TRF REF/QR/رموز) بلا اسم جهة حقيقي.
+    # المبدأ: «نعترف لا نخمّن» — لا نحتسبه إيراداً تشغيلياً ولا نصنّفه «مبيعات» بثقة كاذبة،
+    # بل نستبعده ونعرضه للمستخدم ليوضّحه. (خطأ واثق يقتل الثقة أسرع من الاعتراف بالجهل.)
     has_named_entity = blob.str.contains(r"شركة|مؤسسة|مجموعة", regex=True, case=False, na=False)
     has_merchant = df["الطرف"].apply(lambda p: _clean_merchant(str(p)) is not None)
-    vague_pat = r"\bips\b|تحويل\s*وارد|طرف خارجي|غير محدد"
+    vague_pat = (r"\bips\b|تحويل\s*وارد|طرف\s*خارجي|غير\s*محدد|trf\s*ref|cr-?dr|qr\s*pymt|"
+                 r"ips\s*cr|//\s*xx|3abc|[a-z]{2,}\s*ref\s*\d|ref\s*\d{3,}")
     is_vague_desc = blob.str.contains(vague_pat, regex=True, case=False, na=False)
-    vague_in = (df["النوع"] == "دخل") & is_vague_desc & ~has_named_entity & ~has_merchant
-    df.loc[vague_in, "التصنيف"] = "تحويل وارد غامض (غير تشغيلي)"
-    df.loc[vague_in, "الطرف"] = "تحويل وارد غامض (غير تشغيلي)"
+    generic_party = df["الطرف"].astype(str).str.strip().isin(
+        {"عميل", "تحويل", "طرف أخرى", "عملية مصرفية", "تاجر", "مورد", "غير محدد", ""})
+    vague_in = (df["النوع"] == "دخل") & is_vague_desc & ~has_named_entity & (~has_merchant | generic_party)
+    df.loc[vague_in, "التصنيف"] = "وارد غير مُوضّح (يحتاج توضيح)"
+    df.loc[vague_in, "الطرف"] = "وارد غير مُوضّح (يحتاج توضيح)"
+
+    # شيك مرتجع: إيداع شيك ثم ارتجاعه بنفس المبلغ والطرف = دخل وهمي (لا يُحتسب إيراداً).
+    df = _tag_returned_cheques(df)
     return df
+
+
+def _tag_returned_cheques(df: pd.DataFrame) -> pd.DataFrame:
+    """يبطل أزواج (إيداع شيك ↔ ارتجاع شيك) بنفس الطرف والمبلغ — إيداعٌ لم يُصرف فعلاً.
+    يمنع احتساب الـ65,000 المرتجعة كإيراد تشغيلي، ويهيّئها لكشف الشذوذ لاحقاً."""
+    bayan = df["البيان"].astype(str)
+    reversed_mask = bayan.str.contains(r"ارتجاع\s*شيك|شيك\s*مرتجع|شيك\s*مرتد|شيك\s*راجع|returned\s*che|bounced",
+                                       regex=True, case=False, na=False)
+    if not reversed_mask.any():
+        return df
+    for _, rev in df[reversed_mask].iterrows():
+        party, amt = str(rev["الطرف"]), float(rev["المبلغ"])
+        # الإيداع المقابل: نفس الطرف والمبلغ، دخل، ووصفه إيداع شيك
+        dep = ((df["النوع"] == "دخل") & (df["الطرف"].astype(str) == party) &
+               (df["المبلغ"] == amt) &
+               df["البيان"].astype(str).str.contains(r"إيداع\s*شيك|شيك", regex=True, na=False))
+        df.loc[dep | (df.index == rev.name), "التصنيف"] = "شيك مرتجع (لا يُحتسب)"
+    return df
+
+
+# رموز مصرفية ليست أسماء جهات — «TRF REF» ليس تاجراً (يمنع تخمين مرجع بنكي كاسم عميل)
+_BANK_CODE_TOKENS = {"trf", "ref", "ips", "qr", "pymt", "cr", "dr", "acct",
+                     "transfer", "payment", "pos", "atm", "chq", "sadad"}
 
 
 def _clean_merchant(desc: str) -> str | None:
@@ -157,7 +216,13 @@ def _clean_merchant(desc: str) -> str | None:
         return None
     name = re.sub(r"\s+", " ", m.group(0)).strip(" .,-")
     skip = ("cash deposit", "online purchase", "the amount", "agmt", "toacct", "fracct")
-    return name[:40] if len(name) >= 4 and name.lower() not in skip else None
+    if len(name) < 4 or name.lower() in skip:
+        return None
+    # كل كلماته رموز مصرفية (TRF REF / IPS CR TRANSFER) → ليس اسم جهة
+    tokens = [t for t in re.split(r"[^A-Za-z]+", name.lower()) if t]
+    if tokens and all(t in _BANK_CODE_TOKENS for t in tokens):
+        return None
+    return name[:40]
 
 
 def _classify(blob: str, desc: str, is_income: bool):
@@ -217,6 +282,120 @@ def _read_structured_pdf(path: str) -> pd.DataFrame:
     return out
 
 
+# ---------- قارئ كشوف Excel البنكية (رأس الجدول مدفون تحت بيانات تعريفية) ----------
+_HDR_TOKENS = ("التاريخ", "البيان", "مدين", "دائن", "الرصيد", "المرجع",
+               "date", "description", "debit", "credit", "balance")
+
+
+def _num(v) -> float:
+    s = re.sub(r"[^\d.\-]", "", str(v))
+    try:
+        return float(s) if s not in ("", "-", ".") else 0.0
+    except ValueError:
+        return 0.0
+
+
+def _party_from_desc(desc: str, is_income: bool) -> str | None:
+    """اسم الطرف من البيان: «شركة البناء المتحدة - دفعة عقد» → شركة البناء المتحدة،
+    و«تحويل راتب - م. س. ع» → م. س. ع (اسم المستفيد، يلزم لكشف الرواتب لكل موظف)."""
+    parts = [p.strip() for p in re.split(r"\s+-\s+|—", str(desc)) if p.strip()]
+    if not parts:
+        return None
+    # رواتب/تحويلات مسمّاة: المستفيد هو الجزء الأخير («تحويل راتب - م. س. ع» → م. س. ع؛
+    # «تحويل صادر - م ع ش» → م ع ش). يلزم لكشف الرواتب لكل موظف والمدفوعات المتصاعدة لجهة.
+    if re.search(r"راتب|رواتب|salary|payroll|تحويل\s*(?:صادر|وارد)|حوالة", parts[0], re.I) and len(parts) > 1:
+        return parts[-1][:40]
+    for p in parts:                                   # جهة مسمّاة (شركة/مؤسسة/بنك…)
+        if re.search(r"شركة|مؤسسة|مجموعة|مصرف|بنك|محطة|مورد", p):
+            return p[:40]
+    return _clean_merchant(desc)
+
+
+def _read_bank_xlsx(path: str) -> pd.DataFrame:
+    """يقرأ كشف حساب Excel بصيغته البنكية: بيانات تعريفية (اسم/آيبان/رصيد افتتاحي)
+    ثم رأس جدول (التاريخ/البيان/مدين/دائن/الرصيد) ثم العمليات. حتمي بالكامل.
+    يلتقط الرصيد الافتتاحي والختامي وأدنى رصيد — لكشف السحب على المكشوف بدقة."""
+    raw = pd.read_excel(path, header=None)
+    hdr_i = None
+    for i in range(min(25, len(raw))):
+        vals = [str(v).strip().lower() for v in raw.iloc[i].tolist()]
+        hits = sum(1 for v in vals if any(t in v for t in [t.lower() for t in _HDR_TOKENS]))
+        if hits >= 3:
+            hdr_i = i
+            break
+    if hdr_i is None:
+        raise ExtractionError("لم يُتعرَّف على رأس جدول كشف بنكي في الملف.")
+
+    # الرصيد الافتتاحي من البيانات التعريفية فوق الرأس
+    opening = 0.0
+    for i in range(hdr_i):
+        cells = [str(v) for v in raw.iloc[i].tolist()]
+        for j, cell in enumerate(cells):
+            if re.search(r"رصيد.*افتتاح|opening\s*balance", cell, re.I):
+                for cand in cells[j:j + 3]:
+                    n = _num(cand)
+                    if n:
+                        opening = n
+                        break
+
+    header = [str(v).strip() for v in raw.iloc[hdr_i].tolist()]
+    body = raw.iloc[hdr_i + 1:].copy()
+    body.columns = header
+
+    def col(*tokens):
+        for c in header:
+            lc = str(c).lower()
+            if any(t in lc or t in str(c) for t in tokens):
+                return c
+        return None
+
+    c_date, c_desc = col("التاريخ", "date"), col("البيان", "description", "الوصف")
+    c_db, c_cr = col("مدين", "debit", "سحب"), col("دائن", "credit", "إيداع")
+    c_bal = col("الرصيد", "balance")
+    if not (c_date and c_desc and (c_db or c_cr)):
+        raise ExtractionError("أعمدة الكشف البنكي غير مكتملة (تاريخ/بيان/مدين/دائن).")
+
+    body["_dt"] = pd.to_datetime(body[c_date], errors="coerce")
+    body = body[body["_dt"].notna()]                 # يسقط «الإجمالي» وسطور الإخلاء تلقائياً
+    if body.empty:
+        raise ExtractionError("لم تُقرأ عمليات من كشف الحساب.")
+
+    rows = []
+    balances = []
+    for _, r in body.iterrows():
+        db = _num(r[c_db]) if c_db else 0.0
+        cr = _num(r[c_cr]) if c_cr else 0.0
+        if db <= 0 and cr <= 0:
+            continue
+        is_income = cr > db
+        amount = cr if is_income else db
+        desc = str(r[c_desc]).strip()
+        cat, party = _classify(desc, desc, is_income)
+        named = _party_from_desc(desc, is_income)
+        if named:
+            party = named
+        rows.append({
+            "التاريخ": r["_dt"].strftime("%Y-%m-%d"),
+            "البيان": desc[:120],
+            "النوع": "دخل" if is_income else "مصروف",
+            "التصنيف": cat, "الطرف": party, "المبلغ": amount,
+        })
+        if c_bal is not None:
+            b = _num(r[c_bal])
+            if b or str(r[c_bal]).strip() not in ("", "nan"):
+                balances.append(b)
+
+    if len(rows) < 3:
+        raise ExtractionError("لم تُقرأ عمليات كافية من كشف الحساب.")
+    out = pd.DataFrame(rows)[STD_COLS]
+    out.attrs["ftype"] = "statement"
+    out.attrs["opening_balance"] = opening
+    if balances:                                     # عمود الرصيد الحقيقي — أدق من إعادة البناء
+        out.attrs["closing_balance"] = balances[-1]
+        out.attrs["min_balance"] = min(balances)
+    return out
+
+
 # ---------- المُرسِل حسب نوع الملف ----------
 def _has_ai():
     return bool(os.environ.get("ANTHROPIC_API_KEY"))
@@ -244,8 +423,11 @@ def extract(path: str) -> pd.DataFrame:
     (AI أو حتمي) — طبقة موحّدة لا تعتمد على مسار الاستخراج."""
     df = _extract_inner(path)
     ftype = df.attrs.get("ftype", "statement")
+    keep_attrs = dict(df.attrs)              # نحفظ الرصيد الافتتاحي/الختامي عبر المعالجة
     if ftype == "statement":                 # الرواتب/الميزانية لهما منطق مختلف مسبقاً
         df = tag_non_operating(df)
+    merged = dict(keep_attrs); merged.update(df.attrs)
+    df.attrs.update(merged)
     df.attrs["ftype"] = ftype
     return df
 
@@ -274,7 +456,12 @@ def _extract_inner(path: str) -> pd.DataFrame:
     # الصيغ المهيكلة: نجرّب القراءة الحتمية أولاً، ونرجع للذكاء الاصطناعي عند الفشل
     try:
         if ext in (".xlsx", ".xls"):
-            return _normalize(pd.read_excel(path), source=ext)
+            try:
+                return _normalize(pd.read_excel(path), source=ext)
+            except ExtractionError:
+                # كشف بنكي مُصدَّر (رأس الجدول مدفون تحت بيانات تعريفية) → قارئ حتمي مخصّص.
+                # حتمي = نفس الأرقام في كل تشغيل، بلا تكلفة API، ويقرأ عمود الرصيد الحقيقي.
+                return _read_bank_xlsx(path)
         if ext == ".csv":
             return _normalize(pd.read_csv(path), source=ext)
         if ext == ".pdf":

@@ -177,7 +177,8 @@ def _view_model(a, lang):
             "ftype": "payroll",
             "payroll_summary": i18n.payroll_summary(a, lang),
             "employees": a.employees[:12],
-            "risks": [{"title": i18n.finding_title(f, lang), "text": i18n.finding_text(f, lang)}
+            "risks": [{"badge": i18n.priority_badge(f.get("severity", "medium"), lang),
+                       "title": i18n.finding_title(f, lang), "text": i18n.finding_text(f, lang)}
                       for f in a.findings],
             "recs": [i18n.rec_text(r, lang) for r in a.recommendations],
         }
@@ -187,7 +188,10 @@ def _view_model(a, lang):
         "decision_head": None, "decision_detail": None,
         "summary": i18n.summary_sentence(a, lang),
         "status_key": band_txt, "safety_label": i18n.safety_label(a.safety_band, lang),
-        "risks": [i18n.finding_text(f, lang) for f in a.findings],
+        "risks": [{"badge": i18n.priority_badge(f.get("severity", "medium"), lang),
+                   "title": i18n.finding_title(f, lang), "text": i18n.finding_text(f, lang)}
+                  for f in a.findings],
+        "chain": i18n.risk_chain_sentences(a, lang),
         "recs": [i18n.rec_text(r, lang) for r in a.recommendations],
         "savings_line": i18n.savings_sentence(a.total_savings, lang) if a.total_savings > 0 else None,
         "survival_line": (i18n.survival_sentence(a.survival_days, lang)
@@ -196,6 +200,7 @@ def _view_model(a, lang):
         "recurring_line": i18n.recurring_sentence(a, lang) if a.recurring else None,
         "operating_note": i18n.operating_note(a, lang),
         "non_operating_items": a.non_operating_items,
+        "score_breakdown": a.score_breakdown,
         # وسادة التدفق: نعرضها كطمأنة حين تكون قوية/متوسطة، أو كتحذير حين يحترق النقد فعلاً.
         # لا نعرض "0% انتبه" لحساب متوازن (داخل≈خارج) — تضليل بالنبرة.
         "resilience_line": (i18n.resilience_sentence(a, lang)

@@ -192,8 +192,26 @@ class Report:
             self.c.drawCentredString(cx, top - 40, _shape(lab))
         self.y = top - bh - 12
 
+    def score_breakdown(self, a):
+        """تفكيك مؤشر الأمان — يجعل الرقم مفهوماً (طلب المستثمر: لماذا 60/100؟)."""
+        bd = getattr(a, "score_breakdown", None)
+        if not bd:
+            return
+        self.space(2)
+        self.lead_text(self.R.get("score_why", "لماذا هذا المؤشر؟"), 11, "Bold", NAVY)
+        self.y -= 16
+        for reason, pts in bd:
+            self.need(16)
+            col = GREEN if pts > 0 else RED
+            sign = "+" if pts > 0 else ""
+            self.lead_text(f"{sign}{pts}", 10.5, "Bold", col, off=0)
+            self.lead_text(reason, 10, "Body", NAVY, off=38)
+            self.y -= 15
+        self.space(4)
+
     def overview(self, a):
         self.hero_stats(a)
+        self.score_breakdown(a)
         self.section_title(self.R["overview"])
         # شارة الحالة تتبع مؤشر الأمان (قصة واحدة متماسكة — لا "صحي" فوق مخاطر)
         band_txt = {"good": self.R["healthy"], "medium": self.R["caution"],
@@ -245,30 +263,45 @@ class Report:
         if a.recurring:
             self.section_title(self.R["recurring"], AMBER)
             self.para(i18n.recurring_sentence(a, self.lang), size=10.5, color=NAVY, gap=2)
-            # نعرض المعدل الشهري الفعلي (لا التسنين ×12) — أصدق لمشاهدات قصيرة المدى
-            top_m = max((r["monthly"] for r in a.recurring), default=1)
+            # النسبة المطبوعة = حصة البند من إجمالي الالتزامات (لا من أكبر بند —
+            # كانت تطبع «AWS = 100%» وهي نسبة عرض الشريط، فتكسر مصداقية الأرقام).
+            total_m = sum(r["monthly"] for r in a.recurring) or 1.0
             for r in a.recurring:
-                self.bar(r["party"], r["monthly"], min(1.0, r["monthly"] / max(top_m, 1)), AMBER)
+                self.bar(r["party"], r["monthly"], r["monthly"] / total_m, AMBER)
         self.hline()
 
     def non_operating(self, a):
         if not a.non_operating_items:
             return
         self.section_title(i18n.ui(self.lang)["non_op_t"], GRAY)
-        top = max((amt for _, amt, _ in a.non_operating_items), default=1)
+        # الحصة من إجمالي غير التشغيلي (كانت تُطبع نسبةً لأكبر بند فيتجاوز المجموع 200%)
+        total = sum(amt for _, amt, _ in a.non_operating_items) or 1.0
         for cat, amt, direction in a.non_operating_items[:8]:
             col = GREEN if direction == "دخل" else RED
-            self.bar(cat, amt, amt / top if top else 0, col)
+            self.bar(cat, amt, amt / total, col)
+        self.hline()
+
+    def chain(self, a):
+        """سلسلة السبب والنتيجة — السرد الذي يربط الأحداث (محرك العلاقات المالية)."""
+        lines = i18n.risk_chain_sentences(a, self.lang)
+        if not lines:
+            return
+        self.section_title(self.R.get("chain", "سلسلة السبب والنتيجة"), NAVY)
+        for s in lines:
+            self.para(s, size=11, color=NAVY, leading=6, gap=7)
         self.hline()
 
     def risks(self, a):
         if not a.findings:
             return
         self.section_title(self.R["risks"], AMBER)
+        _col = {"high": RED, "medium": AMBER, "low": GREEN}
         for f in a.findings:
             self.need(30)
-            col = RED if f.get("severity") == "high" else AMBER
-            self.chip(i18n.finding_title(f, self.lang), col); self.y -= 19
+            sev = f.get("severity", "medium")
+            col = _col.get(sev, AMBER)
+            lab = f"{i18n.priority_word(sev, self.lang)} · {i18n.finding_title(f, self.lang)}"
+            self.chip(lab, col); self.y -= 19
             self.para(i18n.finding_text(f, self.lang), size=10.5, leading=5, gap=1)
         self.hline()
 
@@ -316,7 +349,7 @@ class Report:
             self.payroll_cover(a); self.payroll_employees(a)
             self.risks(a); self.todo(a); self.footer()
         else:
-            self.cover(a); self.overview(a); self.earn_bleed(a)
+            self.cover(a); self.overview(a); self.chain(a); self.earn_bleed(a)
             self.payroll_recurring(a); self.non_operating(a)
             self.risks(a); self.todo(a); self.footer()
         self.c.save()
