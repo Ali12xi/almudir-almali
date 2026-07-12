@@ -297,6 +297,19 @@ class Report:
             self.para("⚠ " + i18n.dq_text(item, self.lang), size=10.5, color=AMBER, gap=3)
         self.hline()
 
+    def silent_bleed(self, a):
+        """النزيف الصامت — رسوم + اشتراكات + غرامات بمجموع سنوي واحد يُقرأ في ثانية."""
+        if a.bleed_yearly <= 0:
+            return
+        self.section_title(self.R.get("bleedbox", "النزيف الصامت"), RED)
+        rows = i18n.bleed_rows(a, self.lang)
+        top = max((v for _, v in rows), default=1)
+        for label, amt in rows:
+            self.bar(label, amt, amt / top if top else 0, RED)
+        for line in self.wrap(i18n.bleed_total_line(a, self.lang), "Bold", 11.5, COLW):
+            self.lead_text(line, 11.5, "Bold", RED); self.y -= 17
+        self.hline()
+
     def best_news(self, a):
         """أفضل خبر — توازن نفسي إلزامي: خطر بلا أمل = قلق؛ صورة كاملة = ثقة."""
         line = i18n.best_news(a, self.lang)
@@ -344,7 +357,9 @@ class Report:
     def todo(self, a):
         if not a.recommendations:
             return
-        self.section_title(self.R["todo"])
+        # «لو كنتُ مديرك المالي اليوم» — القرارات تنفيذية لا نصائح (طلب المراجعين)
+        title = self.R.get("exec", self.R["todo"]) if a.ftype != "payroll" else self.R["todo"]
+        self.section_title(title)
         for i, item in enumerate(a.recommendations, 1):
             self.need(28)
             cx = self.lead_x(8)
@@ -388,7 +403,7 @@ class Report:
             # الترتيب الإلزامي: صادمة (الغلاف) ← مؤشر+تفكيك ← جودة البيانات ← السلسلة
             # ← المخاطر مرتّبة ← أفضل خبر ← دخل/صادر ← يحتاج توضيحك ← الأفعال
             self.cover(a); self.overview(a); self.data_quality(a); self.chain(a)
-            self.risks(a); self.best_news(a); self.earn_bleed(a)
+            self.risks(a); self.silent_bleed(a); self.best_news(a); self.earn_bleed(a)
             self.payroll_recurring(a); self.non_operating(a)
             self.clarify(a); self.todo(a); self.footer()
         self.c.save()

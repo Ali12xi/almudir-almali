@@ -196,6 +196,8 @@ def _view_model(a, lang):
         "chain": i18n.risk_chain_sentences(a, lang),
         "shock": i18n.shock_sentence(a, lang),
         "best_news": i18n.best_news(a, lang),
+        "bleed_rows": i18n.bleed_rows(a, lang) if a.bleed_yearly > 0 else [],
+        "bleed_total": i18n.bleed_total_line(a, lang) if a.bleed_yearly > 0 else None,
         "data_quality": [i18n.dq_text(x, lang) for x in a.data_quality],
         # «يحتاج توضيحك» — المجهول يُعرض ويُسأل عنه، لا يُخمَّن (يشمل المدفوعات المتكررة)
         "clarify": [i18n.finding_text(f, lang) for f in a.findings

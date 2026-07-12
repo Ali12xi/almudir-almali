@@ -74,6 +74,8 @@ class Analysis:
     days_of_cover: float | None = None    # وسيط الرصيد ÷ متوسط الصادر اليومي (وسادة بالأيام)
     cash_branches: int = 0                # عدد فروع الإيداع النقدي (مبيعات نقدية عبر N فروع)
     cash_sales_share: float = 0.0         # حصة المبيعات النقدية من الوارد
+    bleed_items: list = field(default_factory=list)  # [(key, amount)] النزيف الصامت السنوي
+    bleed_yearly: float = 0.0             # مجموع النزيف الصامت (رسوم+اشتراكات+غرامات)
     recurring_payees: list = field(default_factory=list)  # [{payee,count,months,total}] مدفوعات متكررة لأفراد
     data_quality: list = field(default_factory=list)      # [{key,data}] ملاحظات سلامة البيانات
     neg_op_months: int = 0           # عدد الأشهر ذات التدفق التشغيلي السالب
@@ -306,6 +308,7 @@ def analyze(path: str, current_cash: float | None = None) -> Analysis:
     _detect_recurring(a, expense_df)
     _sanity_checks(a, df, income_df, expense_df)
     _detect_findings(a, income_df, expense_df)
+    _compute_bleed(a, expense_df)
     _forecast_runway(a, current_cash)
     _compute_buffer(a, current_cash)
     _build_decision_and_recs(a)
@@ -737,6 +740,15 @@ def _detect_findings(a: Analysis, income_df, expense_df):
         name, amt, share = real_sources[0]
         if share >= 0.30:
             data = {"name": name, "share": share, "monthly": amt / n_months}
+            # تسعير الخطر (طلب كل المراجعين): كم يختفي سنوياً لو فقدته؟
+            # وكم عميلاً بحجم عملائك الآخرين تحتاج لتعويضه؟ — أرقام تعلق في الذهن.
+            data["yearly_at_risk"] = (amt / n_months) * 12
+            others = [o_amt for (_n, o_amt, _s) in real_sources[1:]]
+            if others:
+                avg_other = sum(others) / len(others)
+                if avg_other > 0:
+                    import math
+                    data["clients_to_replace"] = math.ceil(amt / avg_other)
             # تقدير الخطر بالأيام: لو فقدت هذا المصدر، كم يوماً تصمد السيولة؟
             # (نحتاج الرصيد الحالي + معدل الحرق بعد فقده)
             if a.cash and a.avg_monthly_expense > 0:
@@ -827,9 +839,9 @@ def _detect_findings(a: Analysis, income_df, expense_df):
             })
 
     # 8) الغرامات والمخالفات — كانت تذوب في «رسوم» فيغيب مبلغ قابل للتفادي كلياً
-    pen_mask = (expense_df["التصنيف"].astype(str).str.contains("غرامات", na=False)
+    pen_mask = (expense_df["التصنيف"].astype(str).str.contains(r"غرام|مخالف", regex=True, na=False)
                 | expense_df["البيان"].astype(str).str.contains(
-                    r"غرامة|مخالفة|penalty|late\s*fee", regex=True, case=False, na=False))
+                    r"غرام|مخالف|penalty|late\s*fee", regex=True, case=False, na=False))
     if pen_mask.any():
         pen_total = float(expense_df[pen_mask]["المبلغ"].sum())
         if pen_total >= 1000:
@@ -959,6 +971,30 @@ def _detect_anomalies(a: Analysis, income_df, expense_df) -> list:
                         "sar": None, "timeframe": None,
                     })
     return out
+
+
+def _compute_bleed(a: Analysis, expense_df):
+    """النزيف الصامت — أموال تتسرّب بلا قرار: رسوم بنكية + اشتراكات صامتة + غرامات.
+    مجموع واحد سنوي يُقرأ في ثانية (القسم الذي قال المراجعون «وحده قد يجعل الناس يشترون»).
+    لا نضيف «هدراً» مخمّناً — فقط ما رصدناه فعلاً بالحساب."""
+    n = max(1, len(a.months))
+    items = []
+    if not expense_df.empty:
+        cat = expense_df["التصنيف"].astype(str)
+        # رسوم بنكية (لا الحكومية — تلك التزام لا تسريب)
+        fee_mask = cat.str.contains("رسوم", na=False) & ~cat.str.contains("حكومية", na=False)
+        fees = float(expense_df[fee_mask]["المبلغ"].sum())
+        if fees > 0:
+            items.append(("fees", fees / n * 12))
+    if a.recurring_yearly > 0:
+        items.append(("subs", a.recurring_yearly))
+    pen = next((f for f in a.findings if f["key"] == "penalties"), None)
+    if pen:
+        items.append(("fines", pen["data"]["total"]))
+    total = sum(v for _, v in items)
+    if total >= 1000:
+        a.bleed_items = items
+        a.bleed_yearly = total
 
 
 def _forecast_runway(a: Analysis, current_cash: float | None):

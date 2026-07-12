@@ -151,6 +151,16 @@
     </div>
     {% endif %}
 
+    {% if vm.bleed_rows %}
+    <div class="risks bleedbox">
+      <h3>🩸 {{ t.bleed_t }}</h3>
+      {% for label, amt in vm.bleed_rows %}
+      <div class="r">{{ label }} — <strong>{{ "{:,.0f}".format(amt) }}</strong></div>
+      {% endfor %}
+      <div class="savings-line" style="color:var(--red)">{{ vm.bleed_total }}</div>
+    </div>
+    {% endif %}
+
     {% if vm.best_news %}
     <div class="bestbox">
       <h3>✅ {{ t.best_t }}</h3>
@@ -167,7 +177,7 @@
 
     {% if vm.recs %}
     <div class="risks todo">
-      <h3>{{ t.todo_t }}</h3>
+      <h3>{{ t.exec_t }}</h3>
       {% for r in vm.recs %}<div class="r num">{{ loop.index }}. {{ r }}</div>{% endfor %}
       {% if vm.savings_line %}<div class="savings-line">{{ vm.savings_line }}</div>{% endif %}
     </div>

@@ -102,11 +102,21 @@ def finding_text(f, lang) -> str:
         days = d.get("days_if_lost")
         if lang == "ar":
             s = (f"أكبر مصدر وارد ({d['name']}) يمثّل {pct(d['share'])} من الوارد إلى حسابك. "
-                 f"لو توقّف، ينقص وارِدك حوالي {money(d['monthly'], 'ar')} شهرياً")
-            return s + (f" — وسيولتك تكفي ~{days:.0f} يوم فقط بعد فقده." if days else ".")
+                 f"لو توقّف، تخسر ~{money(d.get('yearly_at_risk', d['monthly']*12), 'ar')} سنوياً")
+            if d.get("clients_to_replace"):
+                n_c = d["clients_to_replace"]
+                word = "عميلين" if n_c == 2 else ("عملاء" if 3 <= n_c <= 10 else "عميلاً")
+                s += f"، وتحتاج ~{n_c} {word} بحجم عملائك الآخرين لتعويضه"
+            if days:
+                s += f"، وسيولتك تكفي ~{days:.0f} يوم فقط بعد فقده"
+            return s + "."
         s = (f"Your largest inflow source ({d['name']}) makes up {pct(d['share'])} of money coming in. "
-             f"If it stops, your inflows drop about {money(d['monthly'], 'en')} per month")
-        return s + (f" — and your cash would last only ~{days:.0f} days after losing it." if days else ".")
+             f"If it stops, you lose ~{money(d.get('yearly_at_risk', d['monthly']*12), 'en')} per year")
+        if d.get("clients_to_replace"):
+            s += f", and you'd need ~{d['clients_to_replace']} clients the size of your others to replace it"
+        if days:
+            s += f", and your cash would last only ~{days:.0f} days after losing it"
+        return s + "."
     if k == "margin_erosion":
         if lang == "ar":
             return (f"نسبة صافي تدفقك النقدي نزلت من {pct(d['first'])} إلى {pct(d['last'])} خلال الفترة "
@@ -605,9 +615,29 @@ def survival_sentence(days, lang) -> str:
 
 
 def savings_sentence(amount, lang) -> str:
+    # «لو نفّذت جميع التوصيات» — تحفّظ إلزامي حتى لا يُقرأ الرقم كمبلغ مضمون
     if lang == "ar":
-        return f"تنفيذ التوصيات يوفّر لك حوالي {money(amount,'ar')} سنوياً."
-    return f"Acting on the recommendations saves you about {money(amount,'en')} per year."
+        return (f"لو نفّذت جميع التوصيات، توفّر حوالي {money(amount,'ar')} سنوياً "
+                f"— تقدير مشروط بالتنفيذ، وليس مبلغاً مضموناً.")
+    return (f"If you act on all recommendations, you save about {money(amount,'en')} per year "
+            f"— an estimate conditional on execution, not a guaranteed amount.")
+
+
+def bleed_rows(a, lang) -> list:
+    """صفوف النزيف الصامت: (التسمية، المبلغ السنوي)."""
+    names = {"fees": ("رسوم بنكية", "Bank fees"),
+             "subs": ("اشتراكات صامتة", "Silent subscriptions"),
+             "fines": ("غرامات ومخالفات", "Fines & penalties")}
+    i = 0 if lang == "ar" else 1
+    return [(names[k][i], v) for k, v in a.bleed_items if k in names]
+
+
+def bleed_total_line(a, lang) -> str:
+    if lang == "ar":
+        return (f"الإجمالي: ~{money(a.bleed_yearly,'ar')} سنوياً تتسرّب بلا قرار منك — "
+                f"كل بند منها قابل للإيقاف أو التفاوض.")
+    return (f"Total: ~{money(a.bleed_yearly,'en')} per year leaking without a decision from you — "
+            f"every line is stoppable or negotiable.")
 
 
 def operating_note(a, lang) -> str | None:
@@ -689,6 +719,8 @@ REPORT = {
         "risks": "المخاطر المخفية", "todo": "ماذا تفعل الآن",
         "chain": "سلسلة السبب والنتيجة", "priority": "الأولوية", "score_why": "لماذا هذا المؤشر؟",
         "dq": "ملاحظات على جودة البيانات", "best": "أفضل خبر", "clarify": "يحتاج توضيحك",
+        "bleedbox": "النزيف الصامت — أموال تتسرّب بلا قرار",
+        "exec": "لو كنتُ مديرك المالي اليوم — أول 3 قرارات",
         "footer": "تحليل تدفق نقدي مبني على كشف حسابك البنكي — يكشف حركة نقدك ومخاطرها، وليس صافي "
                   "الربح المحاسبي (الذي يحتاج فواتيرك ومصاريفك المستحقة). أداة استرشادية لا تغني عن "
                   "مراجعة محاسب مختص. — المدير المالي",
@@ -709,6 +741,8 @@ REPORT = {
         "risks": "Hidden risks", "todo": "What to do now",
         "chain": "Cause & effect", "priority": "Priority", "score_why": "Why this score?",
         "dq": "Data quality notes", "best": "Best news", "clarify": "Needs your clarification",
+        "bleedbox": "Silent bleed — money leaking without a decision",
+        "exec": "If I were your CFO today — first 3 decisions",
         "footer": "A cash-flow analysis based on your bank statement — it surfaces how your cash moves "
                   "and its risks, not accounting net profit (which needs your invoices and accruals). "
                   "A guidance tool, not a substitute for a qualified accountant. — The Financial Director",
@@ -781,6 +815,8 @@ def ui(lang):
         "hidden": "المخاطر المخفية", "chain_t": "سلسلة السبب والنتيجة", "todo_t": "ماذا تفعل الآن", "payroll_t": "قراءة الرواتب",
         "dq_t": "ملاحظات على جودة البيانات — راجعها قبل الاعتماد على الأرقام",
         "best_t": "أفضل خبر", "clarify_t": "يحتاج توضيحك",
+        "bleed_t": "النزيف الصامت — أموال تتسرّب بلا قرار",
+        "exec_t": "لو كنتُ مديرك المالي اليوم — أول 3 قرارات",
         "recurring_t": "الالتزامات الصامتة", "summary_t": "ملخص الوضع النقدي",
         "cashflow_note": "هذه أرقام تدفق نقدي من كشف البنك — وليست صافي ربح محاسبي.",
         "payroll_mode": "تحليل الرواتب", "employees_t": "كشف الموظفين",
@@ -854,6 +890,8 @@ def ui(lang):
         "hidden": "Hidden risks", "chain_t": "Cause & effect", "todo_t": "What to do now", "payroll_t": "Payroll read",
         "dq_t": "Data quality notes — review before relying on the numbers",
         "best_t": "Best news", "clarify_t": "Needs your clarification",
+        "bleed_t": "Silent bleed — money leaking without a decision",
+        "exec_t": "If I were your CFO today — first 3 decisions",
         "recurring_t": "Silent commitments", "summary_t": "Cash situation summary",
         "cashflow_note": "These are cash-flow figures from your bank statement — not accounting net profit.",
         "payroll_mode": "Payroll analysis", "employees_t": "Employees",
