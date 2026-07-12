@@ -156,6 +156,8 @@ footer .fcopy{font-size:13px;margin-top:14px;color:#7f97ad}
 .risks .r{border-top:1px solid var(--line);padding:12px 0;font-size:14.5px;color:var(--ink);line-height:1.7}
 .risks .r:first-of-type{border-top:none}
 .pri{font-weight:700;font-size:13px;white-space:nowrap;margin-inline-end:5px}
+/* الأرقام السالبة في RTL تُعرض «956%-» فتُقرأ موجبة — عزل اتجاهي للقيم الرقمية */
+.stat .v,.hero-card .hv,.score-bd span{direction:ltr;unicode-bidi:isolate;display:inline-block}
 /* الجملة الصادمة — أول ما يراه المستخدم، بأكبر خط في التقرير */
 .shock{background:#fff;border:1px solid var(--line);border-inline-start:6px solid var(--red);
   border-radius:var(--radius);padding:22px 24px;margin-bottom:16px;box-shadow:var(--shadow-sm);

@@ -39,7 +39,8 @@ class Analysis:
     # --- فهم الكشف كاملاً (يُشتق من العمليات الخام — هذا ما يميّزنا) ---
     salary_total: float = 0.0        # إجمالي الرواتب في الفترة
     salary_monthly: float = 0.0      # متوسط الرواتب شهرياً
-    salary_ratio: float = 0.0        # الرواتب ÷ الدخل
+    salary_ratio: float = 0.0        # الرواتب ÷ النقد الداخل فعلياً (مرجع موحّد — أداة تدفق نقدي)
+    salary_ratio_paper: float | None = None  # الرواتب ÷ المبيعات الورقية (وضع الاستحقاق فقط، سطر مسمّى)
     salary_count: int = 0            # عدد المستفيدين المميّزين (تقدير الموظفين)
     score_breakdown: list = field(default_factory=list)  # [(reason, points)] تفكيك مؤشر الأمان
     risk_chain: list = field(default_factory=list)  # [{kind, data}] سلسلة السبب والنتيجة (محرك العلاقات المالية)
@@ -360,14 +361,16 @@ _SALARY_RE = "روات|راتب|أجور|أجر|مكافأ|salary|payroll|wage"
 # تسميات مجمّعة/عامة ليست أسماء موظفين حقيقية — تُستبعد من عدّ الموظفين
 _GENERIC_EMP = {"مدد", "موظف", "غير محدد", "رواتب", "راتب", "ملف رواتب",
                 "الموظفون", "الموظفين", "موظفون", "موظفين",
+                "نظام حماية الأجور", "حماية الأجور", "wps",
                 "payroll", "staff", "employee", "مستفيد", ""}
 
 
 def _count_employees(series) -> int:
-    """يعدّ الموظفين المميّزين، مستبعداً التسميات المجمّعة (دفعة 'مدد'/'موظف' ليست شخصاً)."""
+    """يعدّ الموظفين المميّزين، مستبعداً التسميات المجمّعة — «نظام حماية الأجور» وعاء
+    رواتب لا شخص. لو كانت كلها أوعية: العدد صفر = «غير ظاهر في الكشف»، ولا نخمّن 1."""
     names = {str(x).strip() for x in series}
     real = {n for n in names if n and n.lower() not in _GENERIC_EMP}
-    return len(real) or len(names)
+    return len(real)
 
 
 def _analyze_payroll(a: Analysis, expense_df):
@@ -385,10 +388,13 @@ def _analyze_payroll(a: Analysis, expense_df):
     # يرفع المتوسط فيصير «رواتبك 68,900» لصاحبٍ يعرف رقمه غيباً (64,700) — يفقد الثقة.
     by_month = sal.groupby("ym")["المبلغ"].sum()
     a.salary_monthly = float(by_month.median()) if len(by_month) >= 3 else a.salary_total / n
-    # النسبة من حجم النشاط الحقيقي: في وضع الاستحقاق نستخدم الفواتير (حجم الشركة)،
-    # لا التحصيل النقدي الصغير — وإلا تطلع نسبة مضلّلة (190%!) بسبب تأخر التحصيل.
-    base = a.invoiced_total if a.is_accrual and a.invoiced_total else (a.operating_income or a.total_income)
-    a.salary_ratio = (a.salary_total / base) if base else 0.0
+    # مرجع موحّد (فخ صالح: 305% و53% في نفس الصفحة بلا تسمية): المنتج أداة تدفق
+    # نقدي، فالنسبة الأساسية = من النقد الداخل فعلياً — دائماً. وفي وضع الاستحقاق
+    # نُظهر معها سطراً منفصلاً مسمّى «من مبيعاتك الورقية» — رقمان بتسميتين لا تناقض.
+    base_cash = a.operating_income or a.total_income
+    a.salary_ratio = (a.salary_total / base_cash) if base_cash else 0.0
+    if a.is_accrual and a.invoiced_total:
+        a.salary_ratio_paper = a.salary_total / a.invoiced_total
     a.salary_count = _count_employees(sal["الطرف"])
 
 
@@ -625,15 +631,31 @@ def _sanity_checks(a: Analysis, df, income_df, expense_df):
                 break
 
         # 3) فئة معتبرة تظهر في أقل من نصف الأشهر — ناقصة أم موسمية؟
+        #    نستثني بنود الشراء-لمرة (أصول/معدات): capex يظهر مرة بطبيعته، والسؤال
+        #    عنه «ناقص أم موسمي؟» سؤال غبي يهزّ الثقة (فخ صالح) — له كاشفه الخاص.
         if n_months >= 6:
             for cat, amt, sh in a.expense_by_category:
-                if sh < 0.05:
+                if sh < 0.05 or re.search(r"أصول|أصل|معدات|شراء لمرة|asset|capex", str(cat)):
                     continue
                 m_present = expense_df[expense_df["التصنيف"] == cat]["ym"].nunique()
                 if m_present < n_months * 0.5:
                     notes.append({"key": "gap_pattern",
                                   "data": {"cat": cat, "m": int(m_present), "total": n_months}})
                     break
+
+        # 4) موسمية مطمئنة: مرفق يرتفع صيفاً (يونيو-أغسطس) ويعود لمستواه — نمط طبيعي
+        #    نقوله صراحة. النظام الذي يقول «هذا طبيعي، لا تقلق» يوثق أكثر ممن ينذر من كل شيء.
+        util = expense_df[expense_df["التصنيف"].astype(str).str.contains(_UTILITY_RE, regex=True, case=False, na=False)
+                          | expense_df["البيان"].astype(str).str.contains(_UTILITY_RE, regex=True, case=False, na=False)]
+        if not util.empty and n_months >= 6 and not any(x["key"] == "utility_daily" for x in notes):
+            bym = util.groupby("ym")["المبلغ"].sum()
+            summer = [v for ym, v in bym.items() if ym[5:7] in ("06", "07", "08")]
+            other = [v for ym, v in bym.items() if ym[5:7] not in ("06", "07", "08")]
+            if len(summer) >= 2 and len(other) >= 3 and min(other) > 0:
+                s_avg, o_avg = sum(summer) / len(summer), sum(other) / len(other)
+                if s_avg >= 1.8 * o_avg:
+                    notes.append({"key": "seasonal_ok",
+                                  "data": {"summer": s_avg, "other": o_avg}})
 
     a.data_quality = notes
 

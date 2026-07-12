@@ -21,6 +21,14 @@ def pct(v) -> str:
     return f"{v*100:.0f}%"
 
 
+def spct(v, lang="ar") -> str:
+    """نسبة آمنة الاتجاه: السالب بالعربي يُعرض «956%-» فيُقرأ موجباً (فخ RTL).
+    نكتب «سالب 956%» نصاً — لا لبس في الويب ولا في PDF."""
+    if v >= 0:
+        return f"{v*100:.0f}%"
+    return f"سالب {abs(v)*100:.0f}%" if lang == "ar" else f"minus {abs(v)*100:.0f}%"
+
+
 def timeframe_word(tf, lang):
     return {"monthly": ("شهرياً", "per month"),
             "yearly": ("سنوياً", "per year")}.get(tf, ("", ""))[0 if lang == "ar" else 1]
@@ -119,9 +127,9 @@ def finding_text(f, lang) -> str:
         return s + "."
     if k == "margin_erosion":
         if lang == "ar":
-            return (f"نسبة صافي تدفقك النقدي نزلت من {pct(d['first'])} إلى {pct(d['last'])} خلال الفترة "
+            return (f"نسبة صافي تدفقك النقدي نزلت من {spct(d['first'],'ar')} إلى {spct(d['last'],'ar')} خلال الفترة "
                     f"(انخفاض {d['drop_pts']:.0f} نقطة). ما يبقى في حسابك من كل ريال وارد يتآكل.")
-        return (f"Your net cash-flow ratio fell from {pct(d['first'])} to {pct(d['last'])} over the period "
+        return (f"Your net cash-flow ratio fell from {spct(d['first'],'en')} to {spct(d['last'],'en')} over the period "
                 f"(a {d['drop_pts']:.0f}-point drop). Less of each riyal coming in stays in your account.")
     if k == "sales_up_profit_down":
         if lang == "ar":
@@ -140,11 +148,13 @@ def finding_text(f, lang) -> str:
         return (f"Your inflows can fall only {pct(d['drop_pct'])} before your cash flow turns negative — "
                 f"a thin cushion. Any sudden dip or lost inflow source pushes you into the red fast.")
     if k == "high_payroll":
+        who_ar = f"لـ{d['count']} مستفيد" if d.get("count") else "عبر ملف رواتب جماعي"
+        who_en = f"for {d['count']} recipients" if d.get("count") else "via a bulk payroll file"
         if lang == "ar":
-            return (f"الرواتب تلتهم {pct(d['ratio'])} من الوارد إلى حسابك (~{money(d['monthly'],'ar')} شهرياً "
-                    f"لـ{d['count']} مستفيد). نسبة مرتفعة تجعل أي شهر ضعيف يضغط على نقدك مباشرة.")
-        return (f"Payroll eats {pct(d['ratio'])} of your inflows (~{money(d['monthly'],'en')}/month "
-                f"for {d['count']} recipients). A high ratio means any slow month squeezes your cash immediately.")
+            return (f"الرواتب تلتهم {pct(d['ratio'])} من النقد الداخل فعلياً (~{money(d['monthly'],'ar')} شهرياً "
+                    f"{who_ar}). نسبة مرتفعة تجعل أي شهر ضعيف يضغط على نقدك مباشرة.")
+        return (f"Payroll eats {pct(d['ratio'])} of cash actually coming in (~{money(d['monthly'],'en')}/month "
+                f"{who_en}). A high ratio means any slow month squeezes your cash immediately.")
     if k == "payroll_ratio":
         band = ("مرتفعة — خطر" if d['ratio'] >= 0.55 else "مرتفعة نسبياً" if d['ratio'] >= 0.40 else "ضمن المعقول")
         if lang == "ar":
@@ -432,6 +442,12 @@ def dq_text(item, lang) -> str:
                     f"بيانات ناقصة أم نمط موسمي؟ وضّح حتى لا تنحرف الاتجاهات.")
         return (f"«{d['cat']}» appears in only {d['m']} of {d['total']} months — "
                 f"missing data or seasonal? Clarify so trends don't skew.")
+    if k == "seasonal_ok":
+        if lang == "ar":
+            return (f"فاتورة المرافق ترتفع صيفاً (~{money(d['summer'],'ar')}/شهر مقابل "
+                    f"~{money(d['other'],'ar')} بقية السنة) وتعود لمستواها — نمط موسمي طبيعي، لا يقلقك.")
+        return (f"Utilities rise in summer (~{money(d['summer'],'en')}/month vs "
+                f"~{money(d['other'],'en')} the rest of the year) and settle back — a normal seasonal pattern, no concern.")
     return ""
 
 
@@ -667,12 +683,25 @@ def payroll_summary(a, lang) -> str:
 
 
 def salary_sentence(a, lang) -> str:
-    """ملخص الرواتب المستخرج من الكشف — يظهر دائماً حين توجد رواتب."""
+    """ملخص الرواتب — مرجع واحد مسمّى (النقد الداخل)، وسطر ورقي منفصل في وضع الاستحقاق.
+    العدد صفر = ملف رواتب جماعي (WPS) — نقولها ولا نخمّن «1 مستفيد»."""
     if lang == "ar":
-        return (f"رواتبك ~{money(a.salary_monthly,'ar')} شهرياً لـ{a.salary_count} مستفيد، "
-                f"أي {pct(a.salary_ratio)} من الوارد إلى حسابك.")
-    return (f"Payroll is ~{money(a.salary_monthly,'en')}/month for {a.salary_count} recipients — "
-            f"{pct(a.salary_ratio)} of your inflows.")
+        who = (f"لـ{a.salary_count} مستفيد" if a.salary_count > 0
+               else "عبر ملف رواتب جماعي (عدد الموظفين غير ظاهر في الكشف)")
+        s = (f"رواتبك ~{money(a.salary_monthly,'ar')} شهرياً {who}، "
+             f"أي {pct(a.salary_ratio)} من النقد الداخل فعلياً إلى حسابك")
+        if a.salary_ratio_paper is not None:
+            s += (f" — ومن مبيعاتك الورقية {pct(a.salary_ratio_paper)} فقط؛ "
+                  f"الفرق لأن رواتبك تُدفع نقداً بينما تحصيلك متأخر")
+        return s + "."
+    who = (f"for {a.salary_count} recipients" if a.salary_count > 0
+           else "via a bulk payroll file (headcount not visible in the statement)")
+    s = (f"Payroll is ~{money(a.salary_monthly,'en')}/month {who} — "
+         f"{pct(a.salary_ratio)} of cash actually coming in")
+    if a.salary_ratio_paper is not None:
+        s += (f" — and only {pct(a.salary_ratio_paper)} of your paper sales; "
+              f"the gap exists because payroll is paid in cash while collections lag")
+    return s + "."
 
 
 def recurring_sentence(a, lang) -> str:
